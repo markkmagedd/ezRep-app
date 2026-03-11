@@ -21,6 +21,7 @@ import {
   getDoc,
   getDocs,
   updateDoc,
+  increment,
   query,
   where,
   orderBy,
@@ -56,6 +57,8 @@ async function requireProfile(user: { uid: string }): Promise<Profile> {
     avatar_url: d.avatar_url ?? null,
     total_volume_kg: d.total_volume_kg ?? 0,
     total_sessions: d.total_sessions ?? 0,
+    total_workouts: d.total_workouts ?? 0,
+    total_training_seconds: d.total_training_seconds ?? 0,
     created_at:
       d.created_at?.toDate?.()?.toISOString() ?? new Date().toISOString(),
   };
@@ -117,6 +120,8 @@ function docToParticipant(
       avatar_url: data.avatar_url ?? null,
       total_volume_kg: 0,
       total_sessions: 0,
+      total_workouts: 0,
+      total_training_seconds: 0,
       created_at: "",
     },
     joined_at: tsToIso(data.joined_at),
@@ -375,6 +380,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         avatar_url: profile.avatar_url,
         total_volume_kg: profile.total_volume_kg,
         total_sessions: profile.total_sessions,
+        total_workouts: profile.total_workouts,
+        total_training_seconds: profile.total_training_seconds,
         created_at: profile.created_at,
       },
       joined_at: now,
@@ -475,7 +482,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           display_name: profile.display_name,
           avatar_url: profile.avatar_url,
           total_volume_kg: profile.total_volume_kg,
-          total_sessions: profile.total_sessions,
+          total_sessions: profile.total_sessions,        total_workouts: profile.total_workouts,
+          total_training_seconds: profile.total_training_seconds,
           created_at: profile.created_at,
         },
         joined_at: new Date().toISOString(),
@@ -664,6 +672,45 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       allSets: sets,
       isLoading: false,
     });
+
+    // Tally stats into the user's profile — once per session per user
+    const user = auth.currentUser;
+    if (user && session.status === "completed") {
+      const participantRef = doc(
+        db,
+        "sessions",
+        sessionId,
+        "participants",
+        user.uid,
+      );
+      const participantSnap2 = await getDoc(participantRef);
+      if (participantSnap2.exists() && !participantSnap2.data().stats_tallied) {
+        const myStats = stats.participants.find(
+          (p) => p.user_id === user.uid,
+        );
+        const myVolume = myStats?.total_volume_kg ?? 0;
+        await Promise.all([
+          updateDoc(doc(db, "users", user.uid), {
+            total_sessions: increment(1),
+            total_volume_kg: increment(myVolume),
+            total_training_seconds: increment(durationSeconds),
+          }),
+          updateDoc(participantRef, { stats_tallied: true }),
+        ]);
+        // Refresh in-memory profile
+        const { profile } = useAuthStore.getState();
+        if (profile) {
+          useAuthStore.setState({
+            profile: {
+              ...profile,
+              total_sessions: profile.total_sessions + 1,
+              total_volume_kg: profile.total_volume_kg + myVolume,
+              total_training_seconds: profile.total_training_seconds + durationSeconds,
+            },
+          });
+        }
+      }
+    }
 
     return stats;
   },

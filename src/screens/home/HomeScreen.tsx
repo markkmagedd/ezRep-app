@@ -74,8 +74,12 @@ export default function HomeScreen({ navigation }: Props) {
     navigation.navigate("WorkoutLogger", {});
   }
 
-  const totalVolume = profile?.total_volume_kg ?? 0;
   const totalSessions = profile?.total_sessions ?? 0;
+  const totalWorkouts = profile?.total_workouts ?? 0;
+  const totalTrainingSecs = profile?.total_training_seconds ?? 0;
+  const trainingHours = Math.floor(totalTrainingSecs / 3600);
+  const trainingMins = Math.floor((totalTrainingSecs % 3600) / 60);
+  const trainingLabel = trainingHours > 0 ? `${trainingHours}h ${trainingMins}m` : `${trainingMins}m`;
 
   return (
     <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
@@ -105,9 +109,9 @@ export default function HomeScreen({ navigation }: Props) {
         {/* Stats strip */}
         <View style={styles.statsRow}>
           <StatPill
-            label="Total Volume"
-            value={`${(totalVolume / 1000).toFixed(1)}t`}
-            icon="barbell"
+            label="Time Trained"
+            value={trainingLabel}
+            icon="time"
           />
           <View style={styles.statsDivider} />
           <StatPill
@@ -118,7 +122,7 @@ export default function HomeScreen({ navigation }: Props) {
           <View style={styles.statsDivider} />
           <StatPill
             label="Workouts"
-            value={String(recentWorkouts.length)}
+            value={String(totalWorkouts)}
             icon="fitness"
           />
         </View>

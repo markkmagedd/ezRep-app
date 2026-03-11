@@ -302,6 +302,9 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
     try {
       const endedAt = new Date();
       let totalVolume = 0;
+      const durationSeconds = activeWorkout.started_at
+        ? Math.round((endedAt.getTime() - new Date(activeWorkout.started_at).getTime()) / 1000)
+        : 0;
 
       const exercisesPayload = exercises.map((ex) => {
         const completedSets = ex.sets.filter((s) => s.completed);
@@ -337,6 +340,8 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
       // Increment lifetime stats on the user profile doc
       await updateDoc(doc(db, "users", user.uid), {
         total_volume_kg: increment(totalVolume),
+        total_workouts: increment(1),
+        total_training_seconds: increment(durationSeconds),
       });
 
       // Advance the linked routine to the next day (wraps around)

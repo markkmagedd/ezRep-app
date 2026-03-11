@@ -10,6 +10,8 @@ export interface Profile {
   avatar_url: string | null;
   total_volume_kg: number; // lifetime volume lifted
   total_sessions: number;
+  total_workouts: number;
+  total_training_seconds: number;
   created_at: string;
 }
 

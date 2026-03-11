@@ -60,6 +60,8 @@ async function fetchProfile(uid: string): Promise<Profile | null> {
     avatar_url: d.avatar_url ?? null,
     total_volume_kg: d.total_volume_kg ?? 0,
     total_sessions: d.total_sessions ?? 0,
+    total_workouts: d.total_workouts ?? 0,
+    total_training_seconds: d.total_training_seconds ?? 0,
     created_at:
       d.created_at?.toDate?.()?.toISOString() ?? new Date().toISOString(),
   };
@@ -143,6 +145,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         email: user.email,
         total_volume_kg: 0,
         total_sessions: 0,
+        total_workouts: 0,
+        total_training_seconds: 0,
         created_at: serverTimestamp(),
       });
       // Explicitly load profile now that the doc exists.

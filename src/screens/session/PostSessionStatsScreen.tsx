@@ -53,7 +53,7 @@ export default function PostSessionStatsScreen({ navigation, route }: Props) {
 
   if (isLoading || !stats) {
     return (
-      <SafeAreaView style={styles.safe}>
+      <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={Colors.accent} />
           <Text style={styles.loadingText}>Calculating results…</Text>
@@ -96,7 +96,7 @@ export default function PostSessionStatsScreen({ navigation, route }: Props) {
   }
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
@@ -228,14 +228,6 @@ export default function PostSessionStatsScreen({ navigation, route }: Props) {
             </View>
           </Card>
         )}
-
-        <Button
-          label="Back to Home"
-          onPress={() => navigation.popToTop()}
-          variant="secondary"
-          size="lg"
-          style={{ marginTop: Spacing.xl }}
-        />
 
         <View style={{ height: Spacing.xxl }} />
       </ScrollView>
