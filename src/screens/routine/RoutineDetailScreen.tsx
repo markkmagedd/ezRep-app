@@ -75,10 +75,6 @@ export default function RoutineDetailScreen({ navigation, route }: Props) {
         routineDayId: day.id,
         routineId: routine?.id,
       });
-      navigation.navigate("WorkoutLogger", {
-        routineDayId: day.id,
-        routineDayName: day.name,
-      });
     } catch {
       Alert.alert("Error", "Could not start workout. Please try again.");
     }

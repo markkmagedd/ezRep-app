@@ -133,6 +133,10 @@ function SessionStackNavigator() {
   );
 }
 
+// ── Floating minimized workout bar ─────────────────────────────────────────
+
+// (Replaced by WorkoutSheet bottom sheet — see src/components/workout/WorkoutSheet.tsx)
+
 // ── Tab navigator ───────────────────────────────────────────────────────────
 
 const Tab = createBottomTabNavigator<AppTabParamList>();

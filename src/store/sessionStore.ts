@@ -482,7 +482,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           display_name: profile.display_name,
           avatar_url: profile.avatar_url,
           total_volume_kg: profile.total_volume_kg,
-          total_sessions: profile.total_sessions,        total_workouts: profile.total_workouts,
+          total_sessions: profile.total_sessions,
+          total_workouts: profile.total_workouts,
           total_training_seconds: profile.total_training_seconds,
           created_at: profile.created_at,
         },
@@ -685,9 +686,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       );
       const participantSnap2 = await getDoc(participantRef);
       if (participantSnap2.exists() && !participantSnap2.data().stats_tallied) {
-        const myStats = stats.participants.find(
-          (p) => p.user_id === user.uid,
-        );
+        const myStats = stats.participants.find((p) => p.user_id === user.uid);
         const myVolume = myStats?.total_volume_kg ?? 0;
         await Promise.all([
           updateDoc(doc(db, "users", user.uid), {
@@ -705,7 +704,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
               ...profile,
               total_sessions: profile.total_sessions + 1,
               total_volume_kg: profile.total_volume_kg + myVolume,
-              total_training_seconds: profile.total_training_seconds + durationSeconds,
+              total_training_seconds:
+                profile.total_training_seconds + durationSeconds,
             },
           });
         }

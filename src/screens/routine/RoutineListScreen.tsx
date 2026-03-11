@@ -44,7 +44,7 @@ export default function RoutineListScreen({ navigation }: Props) {
     deleteRoutine,
     isLoading,
   } = useRoutineStore();
-  const { startWorkout, activeWorkout } = useWorkoutStore();
+  const { startWorkout, activeWorkout, expandWorkout } = useWorkoutStore();
 
   const [refreshing, setRefreshing] = React.useState(false);
 
@@ -110,10 +110,6 @@ export default function RoutineListScreen({ navigation }: Props) {
         routineDayId: today.id,
         routineId: activeRoutine.id,
       });
-      navigation.navigate("WorkoutLogger", {
-        routineDayId: today.id,
-        routineDayName: today.name,
-      });
     } catch {
       Alert.alert("Error", "Could not start workout. Please try again.");
     }
@@ -156,22 +152,30 @@ export default function RoutineListScreen({ navigation }: Props) {
             {/* ── Today's Workout widget ──────────────────────────── */}
             {activeRoutine && (
               <Card variant="accent" padding="lg" style={styles.todayCard}>
-                <View style={styles.todayBadge}>
-                  <Text style={styles.todayBadgeText}>ACTIVE ROUTINE</Text>
+                {/* Badge + routine name top-right */}
+                <View style={styles.todayHeaderRow}>
+                  <View style={styles.todayHeaderRight}>
+                    <View style={styles.todayBadge}>
+                      <Text style={styles.todayBadgeText}>ACTIVE ROUTINE</Text>
+                    </View>
+                    <Text style={styles.todayRoutineName}>
+                      {activeRoutine.name.toUpperCase()}
+                    </Text>
+                  </View>
                 </View>
-                <Text style={styles.todayRoutineName}>
-                  {activeRoutine.name}
-                </Text>
 
                 {todayDay ? (
                   <>
-                    <View style={styles.todayDayRow}>
-                      <Text style={styles.todayDayLabel}>
-                        Day {todayIndex + 1} of {activeDays.length}
-                      </Text>
-                      <Text style={styles.todayDayName}>{todayDay.name}</Text>
-                    </View>
-                    <Text style={styles.todayExCount}>
+                    {/* Divider */}
+                    <View style={styles.todayDivider} />
+
+                    {/* Today's workout */}
+                    <Text style={styles.todayWorkoutLabel}>
+                      TODAY'S WORKOUT
+                    </Text>
+                    <Text style={styles.todayDayName}>{todayDay.name}</Text>
+                    <Text style={styles.todayDayLabel}>
+                      Day {todayIndex + 1} of {activeDays.length} ·{" "}
                       {todayDay.exercises.length} exercise
                       {todayDay.exercises.length !== 1 ? "s" : ""}
                     </Text>
@@ -184,7 +188,7 @@ export default function RoutineListScreen({ navigation }: Props) {
                       }
                       onPress={
                         activeWorkout
-                          ? () => navigation.navigate("WorkoutLogger", {})
+                          ? expandWorkout
                           : handleStartToday
                       }
                       variant="primary"
@@ -237,80 +241,72 @@ export default function RoutineListScreen({ navigation }: Props) {
               padding="md"
               style={styles.routineCard}
             >
-              <TouchableOpacity
-                onPress={() =>
-                  navigation.navigate("RoutineDetail", {
-                    routineId: routine.id,
-                  })
-                }
-                activeOpacity={0.7}
-                style={{ flex: 1 }}
-              >
-                <View style={styles.routineCardHeader}>
-                  <View style={{ flex: 1 }}>
-                    <Text
-                      style={[
-                        styles.routineName,
-                        isActive && { color: Colors.accent },
-                      ]}
+              <View style={styles.routineCardInner}>
+                {/* Left: info (clickable) */}
+                <TouchableOpacity
+                  onPress={() =>
+                    navigation.navigate("RoutineDetail", {
+                      routineId: routine.id,
+                    })
+                  }
+                  activeOpacity={0.7}
+                  style={styles.routineCardContent}
+                >
+                  <Text
+                    style={[
+                      styles.routineName,
+                      isActive && { color: Colors.accent },
+                    ]}
+                  >
+                    {routine.name}
+                  </Text>
+                  <Text style={styles.routineMeta}>
+                    {days.length} day{days.length !== 1 ? "s" : ""}
+                    {days.length > 0 &&
+                      ` · ${days.map((d) => d.name).join(" / ")}`}
+                  </Text>
+
+                  {isActive && (
+                    <View style={styles.activeBadge}>
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={14}
+                        color={Colors.accent}
+                      />
+                      <Text style={styles.activeBadgeText}>Active</Text>
+                      <Text style={styles.activeDayText}>
+                        · Day{" "}
+                        {(routine.current_day_index %
+                          Math.max(days.length, 1)) +
+                          1}{" "}
+                        next
+                      </Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+
+                {/* Right: actions */}
+                <View style={styles.cardActions}>
+                  {!isActive && (
+                    <TouchableOpacity
+                      style={styles.activateBtn}
+                      onPress={() => handleActivate(routine)}
                     >
-                      {routine.name}
-                    </Text>
-                    <Text style={styles.routineMeta}>
-                      {days.length} day{days.length !== 1 ? "s" : ""}
-                      {days.length > 0 &&
-                        ` · ${days.map((d) => d.name).join(" / ")}`}
-                    </Text>
-                  </View>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={20}
-                    color={Colors.textMuted}
-                  />
-                </View>
-
-                {isActive && (
-                  <View style={styles.activeBadge}>
-                    <Ionicons
-                      name="checkmark-circle"
-                      size={14}
-                      color={Colors.accent}
-                    />
-                    <Text style={styles.activeBadgeText}>Active</Text>
-                    <Text style={styles.activeDayText}>
-                      · Day{" "}
-                      {(routine.current_day_index % Math.max(days.length, 1)) +
-                        1}{" "}
-                      next
-                    </Text>
-                  </View>
-                )}
-              </TouchableOpacity>
-
-              {/* Card actions */}
-              <View style={styles.cardActions}>
-                {!isActive && (
+                      <Ionicons name="flash" size={12} color={Colors.bg} />
+                      <Text style={styles.activateBtnText}>Set Active</Text>
+                    </TouchableOpacity>
+                  )}
                   <TouchableOpacity
                     style={styles.actionBtn}
-                    onPress={() => handleActivate(routine)}
+                    onPress={() => handleDelete(routine)}
                   >
                     <Ionicons
-                      name="radio-button-on-outline"
+                      name="trash-outline"
                       size={18}
-                      color={Colors.textMuted}
+                      color={Colors.danger}
                     />
                   </TouchableOpacity>
-                )}
-                <TouchableOpacity
-                  style={styles.actionBtn}
-                  onPress={() => handleDelete(routine)}
-                >
-                  <Ionicons
-                    name="trash-outline"
-                    size={18}
-                    color={Colors.danger}
-                  />
-                </TouchableOpacity>
+                </View>
               </View>
             </Card>
           );
@@ -351,34 +347,56 @@ const styles = StyleSheet.create({
   list: { padding: Spacing.md, paddingBottom: Spacing.xxl },
 
   todayCard: { marginBottom: Spacing.lg },
-  todayBadge: {
-    backgroundColor: Colors.accent,
-    borderRadius: Radius.pill,
-    paddingVertical: 2,
-    paddingHorizontal: 10,
-    alignSelf: "flex-start",
+  todayHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "flex-start",
     marginBottom: Spacing.sm,
   },
+  todayHeaderRight: {
+    alignItems: "center",
+    gap: 3,
+    width: "100%",
+  },
+  todayBadge: {
+    backgroundColor: Colors.accent + "33",
+    borderRadius: Radius.pill,
+    paddingVertical: 2,
+    paddingHorizontal: 6,
+    alignSelf: "flex-start",
+  },
   todayBadgeText: {
-    color: Colors.bg,
-    fontSize: FontSize.xs,
+    color: Colors.accent,
+    fontSize: 8,
     fontWeight: FontWeight.black,
     letterSpacing: 1,
   },
   todayRoutineName: {
     color: Colors.textPrimary,
-    fontSize: FontSize.xl,
-    fontWeight: FontWeight.bold,
+    fontSize: FontSize.xxl,
+    fontWeight: FontWeight.black,
+  },
+  todayDivider: {
+    height: 1,
+    backgroundColor: Colors.border,
+    marginTop: 4,
     marginBottom: Spacing.sm,
   },
+  todayWorkoutLabel: {
+    color: Colors.textMuted,
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.bold,
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+    marginBottom: 2,
+  },
   todayDayRow: {
-    flexDirection: "row",
-    alignItems: "baseline",
-    gap: Spacing.sm,
+    flexDirection: "column",
+    gap: 2,
   },
   todayDayLabel: {
-    color: Colors.textMuted,
+    color: Colors.textSecondary,
     fontSize: FontSize.sm,
+    marginTop: 2,
   },
   todayDayName: {
     color: Colors.accent,
@@ -408,8 +426,13 @@ const styles = StyleSheet.create({
 
   routineCard: {
     marginBottom: Spacing.sm,
+  },
+  routineCardInner: {
     flexDirection: "row",
     alignItems: "center",
+  },
+  routineCardContent: {
+    flex: 1,
   },
   routineCardHeader: {
     flexDirection: "row",
@@ -442,8 +465,26 @@ const styles = StyleSheet.create({
   },
   cardActions: {
     flexDirection: "row",
+    alignItems: "center",
     gap: Spacing.xs,
     marginLeft: Spacing.sm,
+  },
+  activateBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: Colors.accent,
+    borderRadius: Radius.pill,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  activateBtnText: {
+    color: Colors.bg,
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.black,
+  },
+  activateBtnPlaceholder: {
+    height: 24,
   },
   actionBtn: { padding: 6 },
 

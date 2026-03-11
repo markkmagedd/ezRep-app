@@ -11,6 +11,7 @@ import { useAuthStore } from "@/store/authStore";
 import { Colors } from "@/constants/theme";
 import AuthNavigator from "./AuthNavigator";
 import AppNavigator from "./AppNavigator";
+import WorkoutSheet from "@/components/workout/WorkoutSheet";
 import type { RootStackParamList } from "@/types";
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -35,6 +36,7 @@ export default function RootNavigator() {
           <Stack.Screen name="Auth" component={AuthNavigator} />
         )}
       </Stack.Navigator>
+      {session ? <WorkoutSheet /> : null}
     </NavigationContainer>
   );
 }

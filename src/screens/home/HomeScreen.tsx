@@ -51,8 +51,7 @@ export default function HomeScreen({ navigation }: Props) {
   }
 
   async function handleStartWorkout() {
-    const workoutId = await startWorkout({});
-    navigation.navigate("WorkoutLogger", { workoutId });
+    await startWorkout({});
   }
 
   // ── Active routine helpers ──────────────────────────────────────────────
@@ -71,7 +70,6 @@ export default function HomeScreen({ navigation }: Props) {
       routineDayId: todayDay.id,
       routineId: activeRoutine.id,
     });
-    navigation.navigate("WorkoutLogger", {});
   }
 
   const totalSessions = profile?.total_sessions ?? 0;
@@ -79,7 +77,10 @@ export default function HomeScreen({ navigation }: Props) {
   const totalTrainingSecs = profile?.total_training_seconds ?? 0;
   const trainingHours = Math.floor(totalTrainingSecs / 3600);
   const trainingMins = Math.floor((totalTrainingSecs % 3600) / 60);
-  const trainingLabel = trainingHours > 0 ? `${trainingHours}h ${trainingMins}m` : `${trainingMins}m`;
+  const trainingLabel =
+    trainingHours > 0
+      ? `${trainingHours}h ${trainingMins}m`
+      : `${trainingMins}m`;
 
   return (
     <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
@@ -108,11 +109,7 @@ export default function HomeScreen({ navigation }: Props) {
 
         {/* Stats strip */}
         <View style={styles.statsRow}>
-          <StatPill
-            label="Time Trained"
-            value={trainingLabel}
-            icon="time"
-          />
+          <StatPill label="Time Trained" value={trainingLabel} icon="time" />
           <View style={styles.statsDivider} />
           <StatPill
             label="Sessions"

@@ -4,7 +4,7 @@
 //  add exercises → log sets (weight × reps) → finish
 // ─────────────────────────────────────────────
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -132,8 +132,12 @@ export default function WorkoutLoggerScreen({ navigation, route }: Props) {
       >
         {/* ── Top Bar ────────────────────────────────────── */}
         <View style={styles.topBar}>
-          <TouchableOpacity onPress={confirmDiscard} style={styles.topBarBtn}>
-            <Ionicons name="close" size={22} color={Colors.danger} />
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            onLongPress={confirmDiscard}
+            style={styles.topBarBtn}
+          >
+            <Ionicons name="chevron-down" size={24} color={Colors.textMuted} />
           </TouchableOpacity>
 
           <View style={styles.topBarCenter}>
@@ -202,6 +206,14 @@ export default function WorkoutLoggerScreen({ navigation, route }: Props) {
           >
             <Ionicons name="add-circle" size={20} color={Colors.accent} />
             <Text style={styles.addExText}>Add Exercise</Text>
+          </TouchableOpacity>
+
+          {/* Discard link */}
+          <TouchableOpacity
+            style={styles.discardLink}
+            onPress={confirmDiscard}
+          >
+            <Text style={styles.discardLinkText}>Discard Workout</Text>
           </TouchableOpacity>
 
           <View style={{ height: Spacing.xxl }} />
@@ -434,6 +446,16 @@ const styles = StyleSheet.create({
   addExText: {
     color: Colors.accent,
     fontSize: FontSize.md,
+    fontWeight: FontWeight.bold,
+  },
+  discardLink: {
+    alignItems: "center",
+    marginTop: Spacing.lg,
+    paddingVertical: Spacing.sm,
+  },
+  discardLinkText: {
+    color: Colors.danger,
+    fontSize: FontSize.sm,
     fontWeight: FontWeight.bold,
   },
 

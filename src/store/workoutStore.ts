@@ -56,7 +56,8 @@ interface WorkoutState {
   activeWorkout: Workout | null;
   exercises: DraftExercise[];
   startedAt: Date | null;
-  linkedRoutineId: string | null; // set when workout comes from a routine
+  linkedRoutineId: string | null;
+  sheetExpanded: boolean;
   isLoading: boolean;
   error: string | null;
 
@@ -80,6 +81,8 @@ interface WorkoutState {
 
   finishWorkout: () => Promise<void>;
   discardWorkout: () => void;
+  expandWorkout: () => void;
+  collapseWorkout: () => void;
 
   loadRecentWorkouts: (limit?: number) => Promise<void>;
   loadWorkout: (workoutId: string) => Promise<void>;
@@ -109,6 +112,7 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
   exercises: [],
   startedAt: null,
   linkedRoutineId: null,
+  sheetExpanded: false,
   isLoading: false,
   error: null,
   recentWorkouts: [],
@@ -149,6 +153,7 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
       exercises: [],
       startedAt,
       linkedRoutineId: routineId ?? null,
+      sheetExpanded: true,
       error: null,
     });
 
@@ -303,7 +308,10 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
       const endedAt = new Date();
       let totalVolume = 0;
       const durationSeconds = activeWorkout.started_at
-        ? Math.round((endedAt.getTime() - new Date(activeWorkout.started_at).getTime()) / 1000)
+        ? Math.round(
+            (endedAt.getTime() - new Date(activeWorkout.started_at).getTime()) /
+              1000,
+          )
         : 0;
 
       const exercisesPayload = exercises.map((ex) => {
@@ -367,6 +375,7 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
         exercises: [],
         startedAt: null,
         linkedRoutineId: null,
+        sheetExpanded: false,
         isLoading: false,
       });
     } catch (err: unknown) {
@@ -389,9 +398,13 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
       exercises: [],
       startedAt: null,
       linkedRoutineId: null,
+      sheetExpanded: false,
       error: null,
     });
   },
+
+  expandWorkout: () => set({ sheetExpanded: true }),
+  collapseWorkout: () => set({ sheetExpanded: false }),
 
   // ── loadRecentWorkouts ───────────────────────────────────────────────────
   loadRecentWorkouts: async (n = 10) => {
