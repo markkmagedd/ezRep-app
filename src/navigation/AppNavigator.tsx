@@ -197,7 +197,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     height: Platform.OS === "ios" ? 80 : 60,
     paddingBottom: Platform.OS === "ios" ? 20 : 8,
-    paddingTop: 8,
+    paddingTop: 0,
   },
   tabBarBg: {
     flex: 1,

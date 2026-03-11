@@ -10,12 +10,9 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   TouchableOpacity,
   TextInput,
   Alert,
-  KeyboardAvoidingView,
-  Platform,
   ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -103,14 +100,7 @@ export default function ProfileScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        style={{ flex: 1 }}
-      >
-        <ScrollView
-          contentContainerStyle={styles.scroll}
-          keyboardShouldPersistTaps="handled"
-        >
+      <View style={styles.content}>
           {/* ── Avatar + Identity ──────────────────── */}
           <View style={styles.avatarSection}>
             <View style={styles.avatarCircle}>
@@ -201,12 +191,6 @@ export default function ProfileScreen() {
             />
             <View style={styles.menuDivider} />
             <MenuItem
-              icon="mail-outline"
-              label="Email"
-              detail={profile.email ?? "—"}
-            />
-            <View style={styles.menuDivider} />
-            <MenuItem
               icon="calendar-outline"
               label="Member since"
               detail={formatDate(profile.created_at)}
@@ -219,15 +203,11 @@ export default function ProfileScreen() {
             onPress={handleSignOut}
             variant="danger"
             size="lg"
-            style={{ marginTop: Spacing.xxl }}
-            leftIcon={
-              <Ionicons name="log-out-outline" size={18} color={Colors.error} />
-            }
+            style={{ marginTop: Spacing.md }}
           />
 
           <Text style={styles.versionTag}>ezRep • v1.0.0</Text>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </View>
     </SafeAreaView>
   );
 }
@@ -299,15 +279,16 @@ const styles = StyleSheet.create({
 
   loading: { flex: 1, alignItems: "center", justifyContent: "center" },
 
-  scroll: {
+  content: {
+    flex: 1,
     padding: Spacing.md,
-    paddingBottom: Spacing.xxl,
+    justifyContent: "space-between",
   },
 
   // Avatar
   avatarSection: {
     alignItems: "center",
-    paddingVertical: Spacing.xl,
+    paddingVertical: Spacing.md,
   },
   avatarCircle: {
     width: 88,
@@ -369,8 +350,8 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.bold,
     textTransform: "uppercase",
     letterSpacing: 0.8,
-    marginTop: Spacing.lg,
-    marginBottom: Spacing.sm,
+    marginTop: Spacing.md,
+    marginBottom: Spacing.xs,
   },
 
   // Stats grid
