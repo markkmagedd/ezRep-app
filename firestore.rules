@@ -1,0 +1,55 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── Users ──────────────────────────────────────────────────────────────
+    match /users/{userId} {
+      // Any signed-in user can read profiles (e.g. to look up a username)
+      allow read: if request.auth != null;
+      // Only the owner can write their own profile
+      allow write: if request.auth.uid == userId;
+
+      // Workouts — private to owner
+      match /workouts/{workoutId} {
+        allow read, write: if request.auth.uid == userId;
+      }
+
+      // Routines — private to owner
+      match /routines/{routineId} {
+        allow read, write: if request.auth.uid == userId;
+      }
+    }
+
+    // ─── Sessions ───────────────────────────────────────────────────────────
+    match /sessions/{sessionId} {
+      // Any signed-in user can read session docs (to join via code lookup)
+      allow read: if request.auth != null;
+      // Any signed-in user can create a session (they become host)
+      allow create: if request.auth != null;
+      // Only the host can update the session doc (advance exercise, end, etc.)
+      allow update: if request.auth.uid == resource.data.host_id;
+      allow delete: if request.auth.uid == resource.data.host_id;
+
+      // Participants — any signed-in user can join / update their own slot
+      match /participants/{uid} {
+        allow read: if request.auth != null;
+        allow create: if request.auth != null;
+        allow update, delete: if request.auth.uid == uid;
+      }
+
+      // Exercises — readable by all participants; writable only by host
+      match /exercises/{exerciseId} {
+        allow read: if request.auth != null;
+        allow write: if request.auth.uid ==
+          get(/databases/$(database)/documents/sessions/$(sessionId)).data.host_id;
+      }
+
+      // Sets — readable by all participants; each user logs their own sets
+      match /sets/{setId} {
+        allow read: if request.auth != null;
+        allow create: if request.auth.uid == request.resource.data.user_id;
+        allow update, delete: if request.auth.uid == resource.data.user_id;
+      }
+    }
+  }
+}

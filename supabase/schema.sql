@@ -285,6 +285,100 @@ alter publication supabase_realtime add table sessions;
 alter publication supabase_realtime add table session_participants;
 alter publication supabase_realtime add table session_sets;
 
+-- ─────────────────────────────────────────────────────────────────────────────
+--  7. ROUTINES  (structured training programs)
+--
+--  Hierarchy:
+--    Routine  →  RoutineDay  →  RoutineDayExercise
+--    e.g. "Push Pull Legs" → "Legs (Day 3)" → Hamstring Curl · 4×10
+--
+--  When a user does a workout linked to a routine day, the completed workout
+--  is stored in workouts (routine_id + routine_day_id), and current_day_index
+--  on the routine advances automatically.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+create table if not exists routines (
+  id                 uuid        primary key default gen_random_uuid(),
+  user_id            uuid        not null references profiles (id) on delete cascade,
+  name               text        not null,             -- e.g. "Push Pull Legs"
+  is_active          boolean     not null default false,
+  current_day_index  integer     not null default 0,  -- 0-based index into routine_days
+  created_at         timestamptz not null default now()
+);
+
+create table if not exists routine_days (
+  id          uuid    primary key default gen_random_uuid(),
+  routine_id  uuid    not null references routines (id) on delete cascade,
+  day_number  integer not null,  -- 1-based (Day 1, Day 2 …)
+  name        text    not null,  -- e.g. "Push", "Pull", "Legs"
+  unique (routine_id, day_number)
+);
+
+create table if not exists routine_day_exercises (
+  id               uuid          primary key default gen_random_uuid(),
+  routine_day_id   uuid          not null references routine_days (id) on delete cascade,
+  exercise_id      text          not null,
+  exercise_name    text          not null,
+  order_index      integer       not null default 0,
+  target_sets      integer       not null default 3,
+  target_reps      integer       not null default 10,
+  target_weight_kg numeric(8, 2)           -- optional hint; null = user decides
+);
+
+-- Link workouts back to the routine day that generated them
+alter table workouts
+  add column if not exists routine_id      uuid references routines (id) on delete set null,
+  add column if not exists routine_day_id  uuid references routine_days (id) on delete set null;
+
+-- ── RLS for routine tables ────────────────────────────────────────────────────
+
+alter table routines enable row level security;
+create policy "routines: owner all"
+  on routines for all using (auth.uid() = user_id);
+
+alter table routine_days enable row level security;
+create policy "routine_days: owner all"
+  on routine_days for all
+  using (
+    exists (
+      select 1 from routines r
+      where r.id = routine_days.routine_id and r.user_id = auth.uid()
+    )
+  );
+
+alter table routine_day_exercises enable row level security;
+create policy "routine_day_exercises: owner all"
+  on routine_day_exercises for all
+  using (
+    exists (
+      select 1 from routine_days rd
+      join routines r on r.id = rd.routine_id
+      where rd.id = routine_day_exercises.routine_day_id
+        and r.user_id = auth.uid()
+    )
+  );
+
+-- ── RPC: advance the active routine to the next day (wraps around) ────────────
+create or replace function advance_routine_day(p_routine_id uuid)
+returns void language plpgsql security definer as $$
+declare
+  v_total_days integer;
+  v_current    integer;
+begin
+  select count(*) into v_total_days
+  from routine_days where routine_id = p_routine_id;
+
+  if v_total_days = 0 then return; end if;
+
+  select current_day_index into v_current
+  from routines where id = p_routine_id;
+
+  update routines
+  set current_day_index = (v_current + 1) % v_total_days
+  where id = p_routine_id;
+end;
+$$;
+
 -- ══════════════════════════════════════════════════════════════════════════════
 --  DONE — schema is ready. Now set your EXPO_PUBLIC_SUPABASE_URL and
 --  EXPO_PUBLIC_SUPABASE_ANON_KEY in .env (see .env.example).

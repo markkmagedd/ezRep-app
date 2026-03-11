@@ -1,12 +1,29 @@
 // ─────────────────────────────────────────────
 //  ezRep — Workout Store (Zustand)
-//  Manages the active solo workout session in-memory,
-//  then persists to Supabase on completion.
+//  Manages the active solo workout in-memory,
+//  then persists to Firestore on completion.
+//  Data: Firestore /users/{uid}/workouts/{workoutId}
+//  Each workout doc embeds its exercises + completed sets as arrays.
 // ─────────────────────────────────────────────
 
 import { create } from "zustand";
-import { supabase } from "@/lib/supabase";
-import type { Workout, WorkoutExercise, WorkoutSet } from "@/types";
+import {
+  collection,
+  doc,
+  addDoc,
+  getDoc,
+  getDocs,
+  updateDoc,
+  deleteDoc,
+  query,
+  where,
+  orderBy,
+  limit as fsLimit,
+  increment,
+  serverTimestamp,
+} from "firebase/firestore";
+import { auth, db } from "@/lib/firebase";
+import type { Workout } from "@/types";
 import { useAuthStore } from "./authStore";
 
 // ── Local draft types (in-progress workout) ──────────────────────────────────
@@ -28,11 +45,18 @@ export interface DraftExercise {
   sets: DraftSet[];
 }
 
+export interface StartWorkoutOptions {
+  name?: string;
+  routineDayId?: string; // if set, pre-loads exercises from this routine day
+  routineId?: string; // the parent routine (for day advancement after finish)
+}
+
 interface WorkoutState {
   // Active workout
   activeWorkout: Workout | null;
   exercises: DraftExercise[];
   startedAt: Date | null;
+  linkedRoutineId: string | null; // set when workout comes from a routine
   isLoading: boolean;
   error: string | null;
 
@@ -40,7 +64,7 @@ interface WorkoutState {
   recentWorkouts: Workout[];
 
   // Actions
-  startWorkout: (name?: string) => Promise<string>; // returns workoutId
+  startWorkout: (options?: StartWorkoutOptions) => Promise<string>; // returns workoutId
   addExercise: (exerciseId: string, exerciseName: string) => string;
   removeExercise: (workoutExerciseId: string) => void;
   reorderExercises: (from: number, to: number) => void;
@@ -64,41 +88,103 @@ interface WorkoutState {
 let _setCounter = 0;
 const uid = () => `local_${Date.now()}_${_setCounter++}`;
 
+/** Map a Firestore document to the Workout type. */
+function docToWorkout(id: string, data: Record<string, any>): Workout {
+  return {
+    id,
+    user_id: data.user_id,
+    routine_id: data.routine_id ?? null,
+    routine_day_id: data.routine_day_id ?? null,
+    name: data.name,
+    started_at:
+      data.started_at?.toDate?.()?.toISOString() ?? new Date().toISOString(),
+    ended_at: data.ended_at?.toDate?.()?.toISOString() ?? null,
+    total_volume_kg: data.total_volume_kg ?? 0,
+    notes: data.notes ?? null,
+  };
+}
+
 export const useWorkoutStore = create<WorkoutState>((set, get) => ({
   activeWorkout: null,
   exercises: [],
   startedAt: null,
+  linkedRoutineId: null,
   isLoading: false,
   error: null,
   recentWorkouts: [],
 
   // ── startWorkout ─────────────────────────────────────────────────────────
-  startWorkout: async (name = "Workout") => {
-    const profile = useAuthStore.getState().profile;
-    if (!profile) throw new Error("Not authenticated");
+  startWorkout: async (options = {}) => {
+    const { name = "Workout", routineDayId, routineId } = options;
+    const user = auth.currentUser;
+    if (!user) throw new Error("Not authenticated");
 
     const startedAt = new Date();
-    const { data, error } = await supabase
-      .from("workouts")
-      .insert({
-        user_id: profile.id,
-        name,
-        started_at: startedAt.toISOString(),
-        total_volume_kg: 0,
-      })
-      .select()
-      .single();
 
-    if (error) throw error;
+    const docRef = await addDoc(collection(db, "users", user.uid, "workouts"), {
+      user_id: user.uid,
+      name,
+      started_at: serverTimestamp(),
+      ended_at: null,
+      total_volume_kg: 0,
+      routine_id: routineId ?? null,
+      routine_day_id: routineDayId ?? null,
+      notes: null,
+    });
+
+    const workout: Workout = {
+      id: docRef.id,
+      user_id: user.uid,
+      routine_id: routineId ?? null,
+      routine_day_id: routineDayId ?? null,
+      name,
+      started_at: startedAt.toISOString(),
+      ended_at: null,
+      total_volume_kg: 0,
+      notes: null,
+    };
 
     set({
-      activeWorkout: data as Workout,
+      activeWorkout: workout,
       exercises: [],
       startedAt,
+      linkedRoutineId: routineId ?? null,
       error: null,
     });
 
-    return data.id;
+    // Pre-load exercises from the embedded routine day, if applicable
+    if (routineDayId && routineId) {
+      const routineSnap = await getDoc(
+        doc(db, "users", user.uid, "routines", routineId),
+      );
+      if (routineSnap.exists()) {
+        const routineData = routineSnap.data();
+        const targetDay = (routineData.days ?? []).find(
+          (d: any) => d.id === routineDayId,
+        );
+        if (targetDay) {
+          const preloaded: DraftExercise[] = (targetDay.exercises ?? []).map(
+            (ex: any, i: number) => ({
+              id: uid(),
+              exercise_id: ex.exercise_id,
+              exercise_name: ex.exercise_name,
+              order_index: i,
+              sets: Array.from({ length: ex.target_sets }, (_, si) => ({
+                id: uid(),
+                set_index: si + 1,
+                reps: ex.target_reps,
+                weight_kg: ex.target_weight_kg ?? null,
+                is_warmup: false,
+                completed: false,
+              })),
+            }),
+          );
+          set({ exercises: preloaded });
+        }
+      }
+    }
+
+    return docRef.id;
   },
 
   // ── addExercise ──────────────────────────────────────────────────────────
@@ -159,7 +245,6 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
             {
               id: uid(),
               set_index: e.sets.length + 1,
-              // Pre-fill from last set for convenience
               reps: lastSet?.reps ?? null,
               weight_kg: lastSet?.weight_kg ?? null,
               is_warmup: false,
@@ -205,79 +290,78 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
   },
 
   // ── finishWorkout ────────────────────────────────────────────────────────
-  // Persist all exercises and completed sets to Supabase
+  // Persists the workout as a single Firestore doc update.
+  // Exercises and completed sets are embedded as arrays within the workout doc.
   finishWorkout: async () => {
-    const { activeWorkout, exercises } = get();
+    const { activeWorkout, exercises, linkedRoutineId } = get();
     if (!activeWorkout) return;
+    const user = auth.currentUser;
+    if (!user) return;
 
     set({ isLoading: true });
-
     try {
-      const endedAt = new Date().toISOString();
-
-      // Calculate total volume from completed sets
+      const endedAt = new Date();
       let totalVolume = 0;
-      for (const ex of exercises) {
-        for (const s of ex.sets) {
-          if (s.completed && s.reps && s.weight_kg) {
-            totalVolume += s.reps * s.weight_kg;
-          }
+
+      const exercisesPayload = exercises.map((ex) => {
+        const completedSets = ex.sets.filter((s) => s.completed);
+        for (const s of completedSets) {
+          if (s.reps && s.weight_kg) totalVolume += s.reps * s.weight_kg;
         }
-      }
-
-      // Persist workout exercises
-      for (const ex of exercises) {
-        const { data: weRow } = await supabase
-          .from("workout_exercises")
-          .insert({
-            workout_id: activeWorkout.id,
-            exercise_id: ex.exercise_id,
-            exercise_name: ex.exercise_name,
-            order_index: ex.order_index,
-          })
-          .select()
-          .single();
-
-        if (!weRow) continue;
-
-        // Persist completed sets
-        const completedSets = ex.sets
-          .filter((s) => s.completed)
-          .map((s) => ({
-            workout_exercise_id: weRow.id,
+        return {
+          id: ex.id,
+          exercise_id: ex.exercise_id,
+          exercise_name: ex.exercise_name,
+          order_index: ex.order_index,
+          sets: completedSets.map((s) => ({
+            id: s.id,
             set_index: s.set_index,
             reps: s.reps,
             weight_kg: s.weight_kg,
             is_warmup: s.is_warmup,
-            completed: true,
-            logged_at: endedAt,
-          }));
+            logged_at: endedAt.toISOString(),
+          })),
+        };
+      });
 
-        if (completedSets.length > 0) {
-          await supabase.from("workout_sets").insert(completedSets);
+      // Update workout doc: mark complete and embed exercises
+      await updateDoc(
+        doc(db, "users", user.uid, "workouts", activeWorkout.id),
+        {
+          ended_at: serverTimestamp(),
+          total_volume_kg: totalVolume,
+          exercises: exercisesPayload,
+        },
+      );
+
+      // Increment lifetime stats on the user profile doc
+      await updateDoc(doc(db, "users", user.uid), {
+        total_volume_kg: increment(totalVolume),
+      });
+
+      // Advance the linked routine to the next day (wraps around)
+      if (linkedRoutineId) {
+        const routineRef = doc(
+          db,
+          "users",
+          user.uid,
+          "routines",
+          linkedRoutineId,
+        );
+        const routineSnap = await getDoc(routineRef);
+        if (routineSnap.exists()) {
+          const data = routineSnap.data();
+          const total = (data.days ?? []).length;
+          const next = total > 0 ? (data.current_day_index + 1) % total : 0;
+          await updateDoc(routineRef, { current_day_index: next });
         }
-      }
-
-      // Finalise workout row
-      await supabase
-        .from("workouts")
-        .update({ ended_at: endedAt, total_volume_kg: totalVolume })
-        .eq("id", activeWorkout.id);
-
-      // Increment user lifetime stats
-      const profile = useAuthStore.getState().profile;
-      if (profile) {
-        await supabase.rpc("increment_user_stats", {
-          p_user_id: profile.id,
-          p_volume: totalVolume,
-          p_sessions: 0, // solo workout, not a session
-        });
       }
 
       set({
         activeWorkout: null,
         exercises: [],
         startedAt: null,
+        linkedRoutineId: null,
         isLoading: false,
       });
     } catch (err: unknown) {
@@ -289,44 +373,53 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
   // ── discardWorkout ───────────────────────────────────────────────────────
   discardWorkout: () => {
     const { activeWorkout } = get();
-    // Delete the empty workout row to keep the DB clean
-    if (activeWorkout) {
-      supabase
-        .from("workouts")
-        .delete()
-        .eq("id", activeWorkout.id)
-        .then(() => {});
+    const user = auth.currentUser;
+    if (activeWorkout && user) {
+      deleteDoc(doc(db, "users", user.uid, "workouts", activeWorkout.id)).catch(
+        () => {},
+      );
     }
-    set({ activeWorkout: null, exercises: [], startedAt: null, error: null });
+    set({
+      activeWorkout: null,
+      exercises: [],
+      startedAt: null,
+      linkedRoutineId: null,
+      error: null,
+    });
   },
 
   // ── loadRecentWorkouts ───────────────────────────────────────────────────
-  loadRecentWorkouts: async (limit = 10) => {
-    const profile = useAuthStore.getState().profile;
-    if (!profile) return;
+  loadRecentWorkouts: async (n = 10) => {
+    const user = auth.currentUser;
+    if (!user) return;
 
-    const { data } = await supabase
-      .from("workouts")
-      .select("*")
-      .eq("user_id", profile.id)
-      .not("ended_at", "is", null)
-      .order("started_at", { ascending: false })
-      .limit(limit);
-
-    set({ recentWorkouts: (data ?? []) as Workout[] });
+    const snap = await getDocs(
+      query(
+        collection(db, "users", user.uid, "workouts"),
+        where("ended_at", "!=", null),
+        orderBy("ended_at", "desc"),
+        fsLimit(n),
+      ),
+    );
+    set({ recentWorkouts: snap.docs.map((d) => docToWorkout(d.id, d.data())) });
   },
 
   // ── loadWorkout ──────────────────────────────────────────────────────────
-  // Load a past workout for read-only display
   loadWorkout: async (workoutId) => {
+    const user = auth.currentUser;
+    if (!user) return;
+
     set({ isLoading: true });
-    const { data } = await supabase
-      .from("workouts")
-      .select("*")
-      .eq("id", workoutId)
-      .single();
-    if (data) {
-      set({ activeWorkout: data as Workout, isLoading: false });
+    const snap = await getDoc(
+      doc(db, "users", user.uid, "workouts", workoutId),
+    );
+    if (snap.exists()) {
+      set({
+        activeWorkout: docToWorkout(snap.id, snap.data()),
+        isLoading: false,
+      });
+    } else {
+      set({ isLoading: false });
     }
   },
 }));

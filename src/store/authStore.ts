@@ -1,146 +1,183 @@
 // ─────────────────────────────────────────────
 //  ezRep — Auth Store (Zustand)
 //  Manages the current user session and profile.
+//  Auth: Firebase Authentication
+//  Data: Firestore /users/{uid}
 // ─────────────────────────────────────────────
 
 import { create } from "zustand";
-import { supabase } from "@/lib/supabase";
+import {
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut as firebaseSignOut,
+  onAuthStateChanged,
+  updateProfile as firebaseUpdateProfile,
+  type User as FirebaseUser,
+} from "firebase/auth";
+import {
+  doc,
+  getDoc,
+  setDoc,
+  updateDoc,
+  query,
+  collection,
+  where,
+  getDocs,
+  serverTimestamp,
+} from "firebase/firestore";
+import { auth, db } from "@/lib/firebase";
 import type { Profile } from "@/types";
 
 interface AuthState {
-  // State
-  session:
-    | Awaited<ReturnType<typeof supabase.auth.getSession>>["data"]["session"]
-    | null;
+  // Firebase user (null when signed out)
+  session: FirebaseUser | null;
   profile: Profile | null;
   loading: boolean;
   error: string | null;
 
   // Actions
-  initialize: () => Promise<void>;
+  initialize: () => void;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, username: string) => Promise<void>;
   signOut: () => Promise<void>;
   updateProfile: (updates: Partial<Profile>) => Promise<void>;
 }
 
-export const useAuthStore = create<AuthState>(
-  (set, get) =>
-    ({
-      session: null,
-      profile: null,
-      loading: true,
-      error: null,
+// ── Helpers ────────────────────────────────────────────────────────────────
 
-      // ── initialize ───────────────────────────────────────────────────────────
-      // Called once on app mount. Restores any persisted session and subscribes
-      // to future auth state changes (token refresh, sign-out from another tab, etc.)
-      initialize: async () => {
-        // Restore session from SecureStore
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        set({ session });
+function userDocRef(uid: string) {
+  return doc(db, "users", uid);
+}
 
-        if (session?.user) {
-          await get()._fetchProfile(session.user.id);
+async function fetchProfile(uid: string): Promise<Profile | null> {
+  const snap = await getDoc(userDocRef(uid));
+  if (!snap.exists()) return null;
+  const d = snap.data();
+  return {
+    id: uid,
+    username: d.username,
+    display_name: d.display_name,
+    avatar_url: d.avatar_url ?? null,
+    total_volume_kg: d.total_volume_kg ?? 0,
+    total_sessions: d.total_sessions ?? 0,
+    created_at:
+      d.created_at?.toDate?.()?.toISOString() ?? new Date().toISOString(),
+  };
+}
+
+// ── Store ──────────────────────────────────────────────────────────────────
+
+export const useAuthStore = create<AuthState>((set, get) => ({
+  session: null,
+  profile: null,
+  loading: true,
+  error: null,
+
+  // ── initialize ──────────────────────────────────────────────────────────
+  // Call once on app mount. Sets up the Firebase auth listener which fires
+  // immediately with the persisted user (from AsyncStorage) and on every
+  // subsequent auth state change.
+  initialize: () => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      set({ session: user });
+      if (user) {
+        try {
+          const profile = await fetchProfile(user.uid);
+          set({ profile, loading: false });
+        } catch {
+          set({ profile: null, loading: false });
         }
+      } else {
+        set({ profile: null, loading: false });
+      }
+    });
+    // Return unsubscribe if needed; for app lifetime we don't bother.
+    return unsubscribe;
+  },
 
-        // Listen for future auth changes
-        supabase.auth.onAuthStateChange(async (event, session) => {
-          set({ session });
-          if (session?.user) {
-            await get()._fetchProfile(session.user.id);
-          } else {
-            set({ profile: null });
-          }
-        });
+  // ── signIn ──────────────────────────────────────────────────────────────
+  signIn: async (email, password) => {
+    set({ loading: true, error: null });
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      // onAuthStateChanged handles setting session + profile + loading: false
+    } catch (e: any) {
+      set({ error: e.message, loading: false });
+      throw e;
+    }
+  },
 
-        set({ loading: false });
-      },
+  // ── signUp ──────────────────────────────────────────────────────────────
+  signUp: async (email, password, username) => {
+    set({ loading: true, error: null });
+    try {
+      const cleaned = username.toLowerCase().trim();
 
-      // ── signIn ───────────────────────────────────────────────────────────────
-      signIn: async (email, password) => {
-        set({ loading: true, error: null });
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-        if (error) {
-          set({ error: error.message, loading: false });
-          throw error;
-        }
-        set({ loading: false });
-      },
+      // Check username uniqueness
+      const q = query(
+        collection(db, "users"),
+        where("username", "==", cleaned),
+      );
+      const existing = await getDocs(q);
+      if (!existing.empty) {
+        const msg = "Username already taken. Pick another.";
+        set({ error: msg, loading: false });
+        throw new Error(msg);
+      }
 
-      // ── signUp ───────────────────────────────────────────────────────────────
-      signUp: async (email, password, username) => {
-        set({ loading: true, error: null });
+      // Create Firebase auth user
+      const { user } = await createUserWithEmailAndPassword(
+        auth,
+        email,
+        password,
+      );
 
-        // Check username uniqueness
-        const { data: existing } = await supabase
-          .from("profiles")
-          .select("id")
-          .eq("username", username.toLowerCase())
-          .maybeSingle();
+      // Update Firebase Auth display name
+      await firebaseUpdateProfile(user, { displayName: username });
 
-        if (existing) {
-          const msg = "Username already taken. Pick another.";
-          set({ error: msg, loading: false });
-          throw new Error(msg);
-        }
+      // Create Firestore profile document at /users/{uid}
+      await setDoc(userDocRef(user.uid), {
+        username: cleaned,
+        display_name: username,
+        avatar_url: null,
+        email: user.email,
+        total_volume_kg: 0,
+        total_sessions: 0,
+        created_at: serverTimestamp(),
+      });
+      // Explicitly load profile now that the doc exists.
+      // onAuthStateChanged fires when the Auth user is created (before setDoc),
+      // so fetchProfile would return null there. We overwrite it here.
+      const profile = await fetchProfile(user.uid);
+      set({ profile, loading: false });
+    } catch (e: any) {
+      set({ error: e.message, loading: false });
+      throw e;
+    }
+  },
 
-        // Create auth user
-        const { data, error } = await supabase.auth.signUp({ email, password });
-        if (error) {
-          set({ error: error.message, loading: false });
-          throw error;
-        }
+  // ── signOut ──────────────────────────────────────────────────────────────
+  signOut: async () => {
+    await firebaseSignOut(auth);
+    set({ session: null, profile: null });
+  },
 
-        if (data.user) {
-          // Insert public profile row (handled by DB trigger too, but we set username here)
-          await supabase.from("profiles").upsert({
-            id: data.user.id,
-            username: username.toLowerCase(),
-            display_name: username,
-            total_volume_kg: 0,
-            total_sessions: 0,
-          });
-        }
+  // ── updateProfile ────────────────────────────────────────────────────────
+  updateProfile: async (updates) => {
+    const user = auth.currentUser;
+    const { profile } = get();
+    if (!user || !profile) return;
 
-        set({ loading: false });
-      },
+    // Map snake_case Profile fields → Firestore fields
+    const firestoreUpdates: Record<string, unknown> = {};
+    if (updates.display_name !== undefined)
+      firestoreUpdates.display_name = updates.display_name;
+    if (updates.avatar_url !== undefined)
+      firestoreUpdates.avatar_url = updates.avatar_url;
+    if (updates.username !== undefined)
+      firestoreUpdates.username = updates.username;
 
-      // ── signOut ──────────────────────────────────────────────────────────────
-      signOut: async () => {
-        await supabase.auth.signOut();
-        set({ session: null, profile: null });
-      },
-
-      // ── updateProfile ────────────────────────────────────────────────────────
-      updateProfile: async (updates) => {
-        const { profile } = get();
-        if (!profile) return;
-
-        const { data, error } = await supabase
-          .from("profiles")
-          .update(updates)
-          .eq("id", profile.id)
-          .select()
-          .single();
-
-        if (error) throw error;
-        set({ profile: data as Profile });
-      },
-
-      // ── private helpers ──────────────────────────────────────────────────────
-      _fetchProfile: async (userId: string) => {
-        const { data } = await supabase
-          .from("profiles")
-          .select("*")
-          .eq("id", userId)
-          .single();
-        if (data) set({ profile: data as Profile });
-      },
-    }) as AuthState & { _fetchProfile: (id: string) => Promise<void> },
-);
+    await updateDoc(userDocRef(user.uid), firestoreUpdates);
+    set({ profile: { ...profile, ...updates } });
+  },
+}));

@@ -2,19 +2,33 @@
 //  ezRep — Session Store (Zustand)
 //  Core state machine for the real-time shared workout Session.
 //
-//  Architecture summary:
-//  ─────────────────────
-//  Each session has a Supabase Realtime channel named "session:{sessionId}".
-//  All participants subscribe to this channel; the host also writes to it.
-//
-//  Postgres DB tables track persistent state (participants, logged sets, etc.)
-//  Realtime Broadcast handles ephemeral / low-latency events (set_logged, etc.)
+//  Architecture:
+//  ─────────────
+//  Each session is a Firestore document at /sessions/{sessionId}.
+//  Sub-collections hold participants, exercises, and sets.
+//  Real-time sync uses Firestore onSnapshot (replaces Supabase Realtime).
 //
 //  State machine: lobby → active → completed
 // ─────────────────────────────────────────────
 
 import { create } from "zustand";
-import { supabase } from "@/lib/supabase";
+import {
+  doc,
+  collection,
+  collectionGroup,
+  addDoc,
+  setDoc,
+  getDoc,
+  getDocs,
+  updateDoc,
+  query,
+  where,
+  orderBy,
+  onSnapshot,
+  serverTimestamp,
+  Timestamp,
+} from "firebase/firestore";
+import { auth, db } from "@/lib/firebase";
 import type {
   Session,
   SessionParticipant,
@@ -23,9 +37,32 @@ import type {
   SessionStats,
   ParticipantStats,
   ExerciseStats,
+  Profile,
 } from "@/types";
 import { useAuthStore } from "./authStore";
-import type { RealtimeChannel } from "@supabase/supabase-js";
+
+/** Get the current user's profile — use store cache or fetch from Firestore. */
+async function requireProfile(user: { uid: string }): Promise<Profile> {
+  const cached = useAuthStore.getState().profile;
+  if (cached) return cached;
+  const snap = await getDoc(doc(db, "users", user.uid));
+  if (!snap.exists())
+    throw new Error("Profile not found. Please complete registration.");
+  const d = snap.data();
+  const profile: Profile = {
+    id: user.uid,
+    username: d.username ?? "",
+    display_name: d.display_name ?? "",
+    avatar_url: d.avatar_url ?? null,
+    total_volume_kg: d.total_volume_kg ?? 0,
+    total_sessions: d.total_sessions ?? 0,
+    created_at:
+      d.created_at?.toDate?.()?.toISOString() ?? new Date().toISOString(),
+  };
+  // Populate the auth store so subsequent calls are instant
+  useAuthStore.setState({ profile });
+  return profile;
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -36,6 +73,86 @@ function generateCode(): string {
     { length: 6 },
     () => chars[Math.floor(Math.random() * chars.length)],
   ).join("");
+}
+
+/** Convert a Firestore Timestamp / date value to an ISO string. */
+function tsToIso(ts: any): string {
+  if (!ts) return new Date().toISOString();
+  if (ts instanceof Timestamp) return ts.toDate().toISOString();
+  if (typeof ts === "string") return ts;
+  return new Date().toISOString();
+}
+
+function docToSession(id: string, data: Record<string, any>): Session {
+  return {
+    id,
+    code: data.code,
+    host_id: data.host_id,
+    status: data.status,
+    workout_template_id: data.workout_template_id ?? null,
+    current_exercise_index: data.current_exercise_index ?? 0,
+    created_at: tsToIso(data.created_at),
+    started_at: data.started_at ? tsToIso(data.started_at) : null,
+    ended_at: data.ended_at ? tsToIso(data.ended_at) : null,
+  };
+}
+
+/** Map a Firestore participant doc to the SessionParticipant type.
+ *  Username + displayName are denormalized into the participant doc so
+ *  we never need a JOIN to the user profile. */
+function docToParticipant(
+  sessionId: string,
+  docId: string,
+  data: Record<string, any>,
+): SessionParticipant {
+  return {
+    id: docId,
+    session_id: sessionId,
+    user_id: data.user_id,
+    // Reconstruct a Profile-shaped object from denormalized fields
+    profile: {
+      id: data.user_id,
+      username: data.username ?? "",
+      display_name: data.display_name ?? "",
+      avatar_url: data.avatar_url ?? null,
+      total_volume_kg: 0,
+      total_sessions: 0,
+      created_at: "",
+    },
+    joined_at: tsToIso(data.joined_at),
+    is_ready: data.is_ready ?? false,
+    left_at: data.left_at ? tsToIso(data.left_at) : null,
+    color_index: data.color_index ?? 0,
+  };
+}
+
+function docToExercise(
+  sessionId: string,
+  docId: string,
+  data: Record<string, any>,
+): SessionExercise {
+  return {
+    id: docId,
+    session_id: sessionId,
+    exercise_id: data.exercise_id,
+    exercise_name: data.exercise_name,
+    order_index: data.order_index,
+    target_sets: data.target_sets,
+    target_reps: data.target_reps,
+  };
+}
+
+function docToSet(docId: string, data: Record<string, any>): SessionSet {
+  return {
+    id: docId,
+    session_exercise_id: data.session_exercise_id,
+    session_id: data.session_id,
+    user_id: data.user_id,
+    set_index: data.set_index,
+    reps: data.reps,
+    weight_kg: data.weight_kg,
+    logged_at: tsToIso(data.logged_at),
+  };
 }
 
 /** Compute per-user aggregate stats from raw session sets. */
@@ -109,23 +226,20 @@ function buildStats(
 // ── Store interface ──────────────────────────────────────────────────────────
 
 interface SessionState {
-  // Current session data
   session: Session | null;
   participants: SessionParticipant[];
   exercises: SessionExercise[];
-  // All sets logged by ALL participants (the "live feed")
   allSets: SessionSet[];
-  // Post-session computed stats
   stats: SessionStats | null;
+  history: Session[];
 
-  // Live UI state (ephemeral)
   currentExerciseIndex: number;
   isHost: boolean;
   isLoading: boolean;
   error: string | null;
 
-  // Internal channel reference (not serialised)
-  _channel: RealtimeChannel | null;
+  // Firestore onSnapshot unsubscribers (replaces Supabase Realtime channel)
+  _unsubListeners: (() => void)[];
 
   // Actions
   createSession: (
@@ -140,22 +254,21 @@ interface SessionState {
   leaveSession: () => Promise<void>;
 
   setReady: () => Promise<void>;
-  startSession: () => Promise<void>; // host only
+  startSession: () => Promise<void>;
 
   logSet: (
     sessionExerciseId: string,
     reps: number,
     weightKg: number,
   ) => Promise<void>;
-  advanceExercise: () => Promise<void>; // host only — move to next exercise
+  advanceExercise: () => Promise<void>;
 
   endSession: () => Promise<void>;
   loadStats: (sessionId: string) => Promise<SessionStats>;
+  loadHistory: () => Promise<void>;
 
-  // Internal
   _subscribe: (sessionId: string) => void;
   _unsubscribe: () => void;
-  _applyBroadcast: (event: string, payload: unknown) => void;
 }
 
 // ── Store implementation ──────────────────────────────────────────────────────
@@ -166,190 +279,237 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   exercises: [],
   allSets: [],
   stats: null,
+  history: [],
   currentExerciseIndex: 0,
   isHost: false,
   isLoading: false,
   error: null,
-  _channel: null,
+  _unsubListeners: [],
 
   // ── createSession ─────────────────────────────────────────────────────────
   createSession: async (exerciseDefs) => {
-    const profile = useAuthStore.getState().profile;
-    if (!profile) throw new Error("Not authenticated");
+    const user = auth.currentUser;
+    if (!user) throw new Error("You must be signed in to create a session.");
+    const profile = await requireProfile(user);
 
     set({ isLoading: true, error: null });
 
+    // Generate a unique invite code
     let code = generateCode();
-    // Ensure uniqueness (retry once on collision — astronomically rare)
-    const { data: existing } = await supabase
-      .from("sessions")
-      .select("id")
-      .eq("code", code)
-      .maybeSingle();
-    if (existing) code = generateCode();
+    const codeCheck = await getDocs(
+      query(collection(db, "sessions"), where("code", "==", code)),
+    );
+    if (!codeCheck.empty) code = generateCode();
 
-    // Insert session row
-    const { data: sessionRow, error: sessionErr } = await supabase
-      .from("sessions")
-      .insert({
-        code,
-        host_id: profile.id,
-        status: "lobby",
-        current_exercise_index: 0,
-      })
-      .select()
-      .single();
+    // Create session document
+    const sessionRef = await addDoc(collection(db, "sessions"), {
+      code,
+      host_id: user.uid,
+      status: "lobby",
+      current_exercise_index: 0,
+      workout_template_id: null,
+      created_at: serverTimestamp(),
+      started_at: null,
+      ended_at: null,
+    });
+    const sessionId = sessionRef.id;
 
-    if (sessionErr || !sessionRow)
-      throw sessionErr ?? new Error("Session creation failed");
-    const session = sessionRow as Session;
+    // Add exercises as sub-collection docs
+    const exerciseRefs: SessionExercise[] = [];
+    for (let i = 0; i < exerciseDefs.length; i++) {
+      const e = exerciseDefs[i];
+      const exRef = await addDoc(
+        collection(db, "sessions", sessionId, "exercises"),
+        {
+          exercise_id: e.id,
+          exercise_name: e.name,
+          order_index: i,
+          target_sets: e.targetSets,
+          target_reps: e.targetReps,
+        },
+      );
+      exerciseRefs.push({
+        id: exRef.id,
+        session_id: sessionId,
+        exercise_id: e.id,
+        exercise_name: e.name,
+        order_index: i,
+        target_sets: e.targetSets,
+        target_reps: e.targetReps,
+      });
+    }
 
-    // Insert exercise queue
-    const exerciseRows = exerciseDefs.map((e, i) => ({
-      session_id: session.id,
-      exercise_id: e.id,
-      exercise_name: e.name,
-      order_index: i,
-      target_sets: e.targetSets,
-      target_reps: e.targetReps,
-    }));
-    const { data: exRows } = await supabase
-      .from("session_exercises")
-      .insert(exerciseRows)
-      .select();
+    // Add self as host participant (denormalize username + display_name)
+    await setDoc(doc(db, "sessions", sessionId, "participants", user.uid), {
+      user_id: user.uid,
+      username: profile.username,
+      display_name: profile.display_name,
+      avatar_url: profile.avatar_url ?? null,
+      color_index: 0,
+      is_ready: false,
+      joined_at: serverTimestamp(),
+      left_at: null,
+    });
 
-    // Join as host participant (color_index 0 = accent lime)
-    const { data: participantRow } = await supabase
-      .from("session_participants")
-      .insert({
-        session_id: session.id,
-        user_id: profile.id,
-        color_index: 0,
-        is_ready: false,
-      })
-      .select(
-        `
-        *,
-        profile:profiles(*)
-      `,
-      )
-      .single();
+    const now = new Date().toISOString();
+    const session: Session = {
+      id: sessionId,
+      code,
+      host_id: user.uid,
+      status: "lobby",
+      workout_template_id: null,
+      current_exercise_index: 0,
+      created_at: now,
+      started_at: null,
+      ended_at: null,
+    };
+
+    const selfParticipant: SessionParticipant = {
+      id: user.uid,
+      session_id: sessionId,
+      user_id: user.uid,
+      profile: {
+        id: user.uid,
+        username: profile.username,
+        display_name: profile.display_name,
+        avatar_url: profile.avatar_url,
+        total_volume_kg: profile.total_volume_kg,
+        total_sessions: profile.total_sessions,
+        created_at: profile.created_at,
+      },
+      joined_at: now,
+      is_ready: false,
+      left_at: null,
+      color_index: 0,
+    };
 
     set({
       session,
-      exercises: (exRows ?? []) as SessionExercise[],
-      participants: participantRow
-        ? [participantRow as SessionParticipant]
-        : [],
+      exercises: exerciseRefs,
+      participants: [selfParticipant],
       allSets: [],
       currentExerciseIndex: 0,
       isHost: true,
       isLoading: false,
     });
 
-    get()._subscribe(session.id);
+    get()._subscribe(sessionId);
     return session;
   },
 
   // ── joinSession ───────────────────────────────────────────────────────────
   joinSession: async (code) => {
-    const profile = useAuthStore.getState().profile;
-    if (!profile) throw new Error("Not authenticated");
+    const user = auth.currentUser;
+    if (!user) throw new Error("You must be signed in to join a session.");
+    const profile = await requireProfile(user);
 
     set({ isLoading: true, error: null });
 
-    // Find session by code
-    const { data: sessionRow, error } = await supabase
-      .from("sessions")
-      .select("*")
-      .eq("code", code.toUpperCase())
-      .in("status", ["lobby", "active"])
-      .single();
+    const snap = await getDocs(
+      query(
+        collection(db, "sessions"),
+        where("code", "==", code.toUpperCase()),
+      ),
+    );
+    const activeDoc = snap.docs.find((d) => {
+      const s = d.data().status;
+      return s === "lobby" || s === "active";
+    });
 
-    if (error || !sessionRow) {
+    if (!activeDoc) {
       const msg = "Session not found or already finished.";
       set({ error: msg, isLoading: false });
       throw new Error(msg);
     }
-    const session = sessionRow as Session;
 
-    // Determine next color_index
-    const { data: existingParticipants } = await supabase
-      .from("session_participants")
-      .select("color_index")
-      .eq("session_id", session.id)
-      .is("left_at", null);
+    const sessionId = activeDoc.id;
+    const session = docToSession(sessionId, activeDoc.data());
 
+    // Determine next available color_index
+    const participantsSnap = await getDocs(
+      collection(db, "sessions", sessionId, "participants"),
+    );
     const usedColors = new Set(
-      (existingParticipants ?? []).map((p: any) => p.color_index),
+      participantsSnap.docs
+        .filter((d) => !d.data().left_at)
+        .map((d) => d.data().color_index as number),
     );
     let colorIndex = 0;
     while (usedColors.has(colorIndex)) colorIndex++;
 
-    // Insert participant
-    const { data: participantRow } = await supabase
-      .from("session_participants")
-      .insert({
-        session_id: session.id,
-        user_id: profile.id,
-        color_index: colorIndex,
-        is_ready: false,
-      })
-      .select(`*, profile:profiles(*)`)
-      .single();
+    // Add self as participant
+    await setDoc(doc(db, "sessions", sessionId, "participants", user.uid), {
+      user_id: user.uid,
+      username: profile.username,
+      display_name: profile.display_name,
+      avatar_url: profile.avatar_url ?? null,
+      color_index: colorIndex,
+      is_ready: false,
+      joined_at: serverTimestamp(),
+      left_at: null,
+    });
 
-    // Fetch full participant list and exercise queue
-    const [
-      { data: allParticipants },
-      { data: allExercises },
-      { data: existingSets },
-    ] = await Promise.all([
-      supabase
-        .from("session_participants")
-        .select("*, profile:profiles(*)")
-        .eq("session_id", session.id)
-        .is("left_at", null),
-      supabase
-        .from("session_exercises")
-        .select("*")
-        .eq("session_id", session.id)
-        .order("order_index"),
-      supabase.from("session_sets").select("*").eq("session_id", session.id),
+    // Fetch exercises and existing sets in parallel
+    const [exercisesSnap, setsSnap] = await Promise.all([
+      getDocs(
+        query(
+          collection(db, "sessions", sessionId, "exercises"),
+          orderBy("order_index"),
+        ),
+      ),
+      getDocs(collection(db, "sessions", sessionId, "sets")),
     ]);
+
+    const participants = participantsSnap.docs.map((d) =>
+      docToParticipant(sessionId, d.id, d.data()),
+    );
+    // Ensure self appears in participants (setDoc fires asynchronously)
+    if (!participants.some((p) => p.user_id === user.uid)) {
+      participants.push({
+        id: user.uid,
+        session_id: sessionId,
+        user_id: user.uid,
+        profile: {
+          id: user.uid,
+          username: profile.username,
+          display_name: profile.display_name,
+          avatar_url: profile.avatar_url,
+          total_volume_kg: profile.total_volume_kg,
+          total_sessions: profile.total_sessions,
+          created_at: profile.created_at,
+        },
+        joined_at: new Date().toISOString(),
+        is_ready: false,
+        left_at: null,
+        color_index: colorIndex,
+      });
+    }
 
     set({
       session,
-      participants: (allParticipants ?? []) as SessionParticipant[],
-      exercises: (allExercises ?? []) as SessionExercise[],
-      allSets: (existingSets ?? []) as SessionSet[],
+      participants,
+      exercises: exercisesSnap.docs.map((d) =>
+        docToExercise(sessionId, d.id, d.data()),
+      ),
+      allSets: setsSnap.docs.map((d) => docToSet(d.id, d.data())),
       currentExerciseIndex: session.current_exercise_index,
-      isHost: session.host_id === profile.id,
+      isHost: session.host_id === user.uid,
       isLoading: false,
     });
 
-    get()._subscribe(session.id);
-
-    // Broadcast join event so others update their participant list
-    await supabase.channel(`session:${session.id}`).send({
-      type: "broadcast",
-      event: "participant_joined",
-      payload: { participant: participantRow },
-    });
-
+    get()._subscribe(sessionId);
     return session;
   },
 
   // ── leaveSession ──────────────────────────────────────────────────────────
   leaveSession: async () => {
-    const { session, _channel } = get();
-    const profile = useAuthStore.getState().profile;
-    if (!session || !profile) return;
+    const { session } = get();
+    const user = auth.currentUser;
+    if (!session || !user) return;
 
-    await supabase
-      .from("session_participants")
-      .update({ left_at: new Date().toISOString() })
-      .eq("session_id", session.id)
-      .eq("user_id", profile.id);
+    await updateDoc(doc(db, "sessions", session.id, "participants", user.uid), {
+      left_at: serverTimestamp(),
+    });
 
     get()._unsubscribe();
     set({
@@ -364,29 +524,15 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   // ── setReady ──────────────────────────────────────────────────────────────
+  // Writes to Firestore; onSnapshot propagates the change to all clients.
   setReady: async () => {
     const { session } = get();
-    const profile = useAuthStore.getState().profile;
-    if (!session || !profile) return;
+    const user = auth.currentUser;
+    if (!session || !user) return;
 
-    await supabase
-      .from("session_participants")
-      .update({ is_ready: true })
-      .eq("session_id", session.id)
-      .eq("user_id", profile.id);
-
-    // Broadcast so UI updates instantly without DB polling
-    await supabase.channel(`session:${session.id}`).send({
-      type: "broadcast",
-      event: "participant_ready",
-      payload: { user_id: profile.id },
+    await updateDoc(doc(db, "sessions", session.id, "participants", user.uid), {
+      is_ready: true,
     });
-
-    set((s) => ({
-      participants: s.participants.map((p) =>
-        p.user_id === profile.id ? { ...p, is_ready: true } : p,
-      ),
-    }));
   },
 
   // ── startSession ──────────────────────────────────────────────────────────
@@ -394,74 +540,55 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const { session, isHost } = get();
     if (!session || !isHost) return;
 
-    const startedAt = new Date().toISOString();
-
-    await supabase
-      .from("sessions")
-      .update({ status: "active", started_at: startedAt })
-      .eq("id", session.id);
-
-    await supabase.channel(`session:${session.id}`).send({
-      type: "broadcast",
-      event: "session_started",
-      payload: { started_at: startedAt },
+    await updateDoc(doc(db, "sessions", session.id), {
+      status: "active",
+      started_at: serverTimestamp(),
     });
-
-    set((s) => ({
-      session: s.session
-        ? { ...s.session, status: "active", started_at: startedAt }
-        : null,
-    }));
+    // onSnapshot updates all participants
   },
 
   // ── logSet ────────────────────────────────────────────────────────────────
-  // The most performance-critical path: user logs a set, it broadcasts to ALL
+  // Write to Firestore; onSnapshot on /sets delivers it to everyone in real time.
   logSet: async (sessionExerciseId, reps, weightKg) => {
     const { session, allSets } = get();
-    const profile = useAuthStore.getState().profile;
-    if (!session || !profile) return;
+    const user = auth.currentUser;
+    if (!session || !user) return;
 
-    const logged_at = new Date().toISOString();
-
-    // Determine set index (how many sets this user has already logged for this exercise)
-    const existingSets = allSets.filter(
+    const existingForExercise = allSets.filter(
       (s) =>
-        s.session_exercise_id === sessionExerciseId && s.user_id === profile.id,
+        s.session_exercise_id === sessionExerciseId && s.user_id === user.uid,
     );
-    const setIndex = existingSets.length + 1;
+    const setIndex = existingForExercise.length + 1;
 
-    // Persist to DB
-    const { data: setRow, error } = await supabase
-      .from("session_sets")
-      .insert({
+    const setRef = await addDoc(
+      collection(db, "sessions", session.id, "sets"),
+      {
         session_exercise_id: sessionExerciseId,
         session_id: session.id,
-        user_id: profile.id,
+        user_id: user.uid,
         set_index: setIndex,
         reps,
         weight_kg: weightKg,
-        logged_at,
-      })
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    const newSet = setRow as SessionSet;
-
-    // Optimistic update local state immediately
-    set((s) => ({ allSets: [...s.allSets, newSet] }));
-
-    // Broadcast to all other participants
-    await supabase.channel(`session:${session.id}`).send({
-      type: "broadcast",
-      event: "set_logged",
-      payload: {
-        set: newSet,
-        user_id: profile.id,
-        username: profile.username,
+        logged_at: serverTimestamp(),
       },
-    });
+    );
+
+    // Optimistic update so the logger sees instant feedback
+    const optimistic: SessionSet = {
+      id: setRef.id,
+      session_exercise_id: sessionExerciseId,
+      session_id: session.id,
+      user_id: user.uid,
+      set_index: setIndex,
+      reps,
+      weight_kg: weightKg,
+      logged_at: new Date().toISOString(),
+    };
+    set((s) => ({
+      allSets: s.allSets.some((x) => x.id === setRef.id)
+        ? s.allSets
+        : [...s.allSets, optimistic],
+    }));
   },
 
   // ── advanceExercise ───────────────────────────────────────────────────────
@@ -470,25 +597,15 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     if (!session || !isHost) return;
 
     const nextIndex = currentExerciseIndex + 1;
-
-    // Check if this is the last exercise
     if (nextIndex >= exercises.length) {
       await get().endSession();
       return;
     }
 
-    await supabase
-      .from("sessions")
-      .update({ current_exercise_index: nextIndex })
-      .eq("id", session.id);
-
-    await supabase.channel(`session:${session.id}`).send({
-      type: "broadcast",
-      event: "exercise_advanced",
-      payload: { exercise_index: nextIndex },
+    await updateDoc(doc(db, "sessions", session.id), {
+      current_exercise_index: nextIndex,
     });
-
-    set({ currentExerciseIndex: nextIndex });
+    // onSnapshot propagates to all participants
   },
 
   // ── endSession ────────────────────────────────────────────────────────────
@@ -496,53 +613,37 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const { session, isHost } = get();
     if (!session || !isHost) return;
 
-    const endedAt = new Date().toISOString();
-
-    await supabase
-      .from("sessions")
-      .update({ status: "completed", ended_at: endedAt })
-      .eq("id", session.id);
-
-    await supabase.channel(`session:${session.id}`).send({
-      type: "broadcast",
-      event: "session_ended",
-      payload: { ended_at: endedAt },
+    await updateDoc(doc(db, "sessions", session.id), {
+      status: "completed",
+      ended_at: serverTimestamp(),
     });
-
-    set((s) => ({
-      session: s.session
-        ? { ...s.session, status: "completed", ended_at: endedAt }
-        : null,
-    }));
   },
 
   // ── loadStats ─────────────────────────────────────────────────────────────
   loadStats: async (sessionId) => {
     set({ isLoading: true });
 
-    const [
-      { data: sessionRow },
-      { data: allParticipants },
-      { data: allExercises },
-      { data: allSets },
-    ] = await Promise.all([
-      supabase.from("sessions").select("*").eq("id", sessionId).single(),
-      supabase
-        .from("session_participants")
-        .select("*, profile:profiles(*)")
-        .eq("session_id", sessionId),
-      supabase
-        .from("session_exercises")
-        .select("*")
-        .eq("session_id", sessionId)
-        .order("order_index"),
-      supabase.from("session_sets").select("*").eq("session_id", sessionId),
-    ]);
+    const [sessionSnap, participantsSnap, exercisesSnap, setsSnap] =
+      await Promise.all([
+        getDoc(doc(db, "sessions", sessionId)),
+        getDocs(collection(db, "sessions", sessionId, "participants")),
+        getDocs(
+          query(
+            collection(db, "sessions", sessionId, "exercises"),
+            orderBy("order_index"),
+          ),
+        ),
+        getDocs(collection(db, "sessions", sessionId, "sets")),
+      ]);
 
-    const session = sessionRow as Session;
-    const participants = (allParticipants ?? []) as SessionParticipant[];
-    const exercises = (allExercises ?? []) as SessionExercise[];
-    const sets = (allSets ?? []) as SessionSet[];
+    const session = docToSession(sessionId, sessionSnap.data()!);
+    const participants = participantsSnap.docs.map((d) =>
+      docToParticipant(sessionId, d.id, d.data()),
+    );
+    const exercises = exercisesSnap.docs.map((d) =>
+      docToExercise(sessionId, d.id, d.data()),
+    );
+    const sets = setsSnap.docs.map((d) => docToSet(d.id, d.data()));
 
     const durationSeconds =
       session.started_at && session.ended_at
@@ -567,100 +668,122 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     return stats;
   },
 
-  // ── _subscribe ────────────────────────────────────────────────────────────
-  // Open a Supabase Realtime channel and wire up broadcast listeners.
-  _subscribe: (sessionId) => {
-    const channel = supabase
-      .channel(`session:${sessionId}`)
-      .on("broadcast", { event: "*" }, ({ event, payload }) => {
-        get()._applyBroadcast(event, payload);
-      })
-      .subscribe();
+  // ── loadHistory ───────────────────────────────────────────────────────────
+  // Finds all completed sessions the current user participated in by querying
+  // the participants collectionGroup, then fetches each session doc.
+  loadHistory: async () => {
+    const user = auth.currentUser;
+    if (!user) return;
 
-    set({ _channel: channel });
+    set({ isLoading: true });
+    try {
+      const sessionIds = new Set<string>();
+
+      // 1. Sessions the user hosted — simple single-field query, no index needed
+      const hostedSnap = await getDocs(
+        query(collection(db, "sessions"), where("host_id", "==", user.uid)),
+      );
+      hostedSnap.docs.forEach((d) => sessionIds.add(d.id));
+
+      // 2. Sessions the user joined as a participant — collectionGroup requires
+      //    a Firestore index. If the index doesn't exist yet this throws, and we
+      //    fall back gracefully (hosted sessions are still shown above).
+      try {
+        const participantSnap = await getDocs(
+          query(
+            collectionGroup(db, "participants"),
+            where("user_id", "==", user.uid),
+          ),
+        );
+        participantSnap.docs.forEach((d) => {
+          const sid = d.ref.parent.parent?.id;
+          if (sid) sessionIds.add(sid);
+        });
+      } catch (indexErr: any) {
+        console.warn(
+          "[loadHistory] collectionGroup participants query failed — " +
+            "create a Firestore collection-group index on field 'user_id' " +
+            "for the 'participants' collection group.\n" +
+            indexErr.message,
+        );
+      }
+
+      if (sessionIds.size === 0) {
+        set({ history: [], isLoading: false });
+        return;
+      }
+
+      // Fetch all session docs in parallel
+      const sessionSnaps = await Promise.all(
+        [...sessionIds].map((id) => getDoc(doc(db, "sessions", id))),
+      );
+
+      const history = sessionSnaps
+        .filter((s) => s.exists())
+        .map((s) => docToSession(s.id, s.data()!))
+        .sort(
+          (a, b) =>
+            new Date(b.ended_at ?? b.created_at).getTime() -
+            new Date(a.ended_at ?? a.created_at).getTime(),
+        );
+
+      set({ history, isLoading: false });
+    } catch (e: any) {
+      console.error("[loadHistory] error:", e);
+      set({ error: e.message, isLoading: false });
+    }
+  },
+
+  // ── _subscribe ────────────────────────────────────────────────────────────
+  // Set up three Firestore onSnapshot listeners:
+  //  1. Session doc       → status, current_exercise_index
+  //  2. Participants sub  → ready states, new joiners
+  //  3. Sets sub          → live set feed (ordered by logged_at asc)
+  _subscribe: (sessionId) => {
+    const unsubs: (() => void)[] = [];
+
+    // 1. Session document
+    unsubs.push(
+      onSnapshot(doc(db, "sessions", sessionId), (snap) => {
+        if (!snap.exists()) return;
+        const session = docToSession(sessionId, snap.data());
+        set({ session, currentExerciseIndex: session.current_exercise_index });
+      }),
+    );
+
+    // 2. Participants sub-collection
+    unsubs.push(
+      onSnapshot(
+        collection(db, "sessions", sessionId, "participants"),
+        (snap) => {
+          set({
+            participants: snap.docs.map((d) =>
+              docToParticipant(sessionId, d.id, d.data()),
+            ),
+          });
+        },
+      ),
+    );
+
+    // 3. Sets sub-collection — the live workout feed
+    unsubs.push(
+      onSnapshot(
+        query(
+          collection(db, "sessions", sessionId, "sets"),
+          orderBy("logged_at", "asc"),
+        ),
+        (snap) => {
+          set({ allSets: snap.docs.map((d) => docToSet(d.id, d.data())) });
+        },
+      ),
+    );
+
+    set({ _unsubListeners: unsubs });
   },
 
   // ── _unsubscribe ──────────────────────────────────────────────────────────
   _unsubscribe: () => {
-    const { _channel } = get();
-    if (_channel) {
-      supabase.removeChannel(_channel);
-      set({ _channel: null });
-    }
-  },
-
-  // ── _applyBroadcast ───────────────────────────────────────────────────────
-  // Immutably patch local state from incoming Realtime events.
-  // This is the "receiving" side for all participants (including the sender,
-  // who already applies optimistic updates before broadcasting).
-  _applyBroadcast: (event, payload: any) => {
-    switch (event) {
-      case "participant_joined": {
-        set((s) => {
-          // Avoid duplicates (the joining user already set their own state)
-          if (
-            s.participants.some(
-              (p) => p.user_id === payload.participant?.user_id,
-            )
-          ) {
-            return {};
-          }
-          return { participants: [...s.participants, payload.participant] };
-        });
-        break;
-      }
-
-      case "participant_ready": {
-        set((s) => ({
-          participants: s.participants.map((p) =>
-            p.user_id === payload.user_id ? { ...p, is_ready: true } : p,
-          ),
-        }));
-        break;
-      }
-
-      case "participant_left": {
-        set((s) => ({
-          participants: s.participants.map((p) =>
-            p.user_id === payload.user_id
-              ? { ...p, left_at: payload.left_at }
-              : p,
-          ),
-        }));
-        break;
-      }
-
-      case "set_logged": {
-        // Only apply if we don't already have this set (idempotency)
-        set((s) => {
-          if (s.allSets.some((ss) => ss.id === payload.set?.id)) return {};
-          return { allSets: [...s.allSets, payload.set] };
-        });
-        break;
-      }
-
-      case "exercise_advanced": {
-        set({ currentExerciseIndex: payload.exercise_index });
-        break;
-      }
-
-      case "session_started": {
-        set((s) => ({
-          session: s.session
-            ? { ...s.session, status: "active", started_at: payload.started_at }
-            : null,
-        }));
-        break;
-      }
-
-      case "session_ended": {
-        set((s) => ({
-          session: s.session
-            ? { ...s.session, status: "completed", ended_at: payload.ended_at }
-            : null,
-        }));
-        break;
-      }
-    }
+    get()._unsubListeners.forEach((fn) => fn());
+    set({ _unsubListeners: [] });
   },
 }));

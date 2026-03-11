@@ -26,6 +26,7 @@ import { Card } from "@/components/common/Card";
 import { Button } from "@/components/common/Button";
 import { useAuthStore } from "@/store/authStore";
 import { useWorkoutStore } from "@/store/workoutStore";
+import { useRoutineStore } from "@/store/routineStore";
 import type { HomeStackParamList, Workout } from "@/types";
 
 type Props = NativeStackScreenProps<HomeStackParamList, "Home">;
@@ -34,21 +35,43 @@ export default function HomeScreen({ navigation }: Props) {
   const { profile } = useAuthStore();
   const { recentWorkouts, loadRecentWorkouts, startWorkout } =
     useWorkoutStore();
+  const { activeRoutine, routineDetails, loadRoutines, loadRoutineDetail } =
+    useRoutineStore();
   const [refreshing, setRefreshing] = React.useState(false);
 
   useEffect(() => {
     loadRecentWorkouts();
+    loadRoutines();
   }, []);
 
   async function handleRefresh() {
     setRefreshing(true);
-    await loadRecentWorkouts();
+    await Promise.all([loadRecentWorkouts(), loadRoutines()]);
     setRefreshing(false);
   }
 
   async function handleStartWorkout() {
-    const workoutId = await startWorkout();
+    const workoutId = await startWorkout({});
     navigation.navigate("WorkoutLogger", { workoutId });
+  }
+
+  // ── Active routine helpers ──────────────────────────────────────────────
+  const activeDays = activeRoutine
+    ? (routineDetails[activeRoutine.id] ?? [])
+    : [];
+  const todayIdx = activeRoutine
+    ? activeRoutine.current_day_index % Math.max(activeDays.length, 1)
+    : 0;
+  const todayDay = activeDays[todayIdx];
+
+  async function handleStartRoutineDay() {
+    if (!activeRoutine || !todayDay) return;
+    await startWorkout({
+      name: todayDay.name,
+      routineDayId: todayDay.id,
+      routineId: activeRoutine.id,
+    });
+    navigation.navigate("WorkoutLogger", {});
   }
 
   const totalVolume = profile?.total_volume_kg ?? 0;
@@ -99,6 +122,61 @@ export default function HomeScreen({ navigation }: Props) {
             icon="fitness"
           />
         </View>
+
+        {/* Active routine widget */}
+        {activeRoutine && todayDay && (
+          <Card
+            variant="accent"
+            padding="md"
+            style={{ marginBottom: Spacing.md }}
+          >
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
+                marginBottom: 4,
+              }}
+            >
+              <Ionicons name="barbell" size={16} color={Colors.accent} />
+              <Text
+                style={{
+                  color: Colors.textMuted,
+                  fontSize: FontSize.xs,
+                  fontWeight: FontWeight.bold,
+                  textTransform: "uppercase",
+                  letterSpacing: 0.8,
+                }}
+              >
+                Today's Routine
+              </Text>
+            </View>
+            <Text
+              style={{
+                color: Colors.textPrimary,
+                fontSize: FontSize.xl,
+                fontWeight: FontWeight.black,
+              }}
+            >
+              {todayDay.name}
+            </Text>
+            <Text
+              style={{
+                color: Colors.accentDim,
+                fontSize: FontSize.sm,
+                marginBottom: Spacing.sm,
+              }}
+            >
+              {activeRoutine.name} · Day {todayIdx + 1} of {activeDays.length}
+            </Text>
+            <Button
+              label={`Start ${todayDay.name}`}
+              onPress={handleStartRoutineDay}
+              variant="primary"
+              size="sm"
+            />
+          </Card>
+        )}
 
         {/* Quick Actions */}
         <Text style={styles.sectionTitle}>Quick Start</Text>
@@ -242,7 +320,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: Spacing.lg,
-    marginTop: Spacing.sm,
+    marginTop: 0,
   },
   greeting: {
     color: Colors.textPrimary,

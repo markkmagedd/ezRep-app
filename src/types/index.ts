@@ -1,6 +1,5 @@
 // ─────────────────────────────────────────────
 //  ezRep — Shared TypeScript Types
-//  Mirrors the Supabase PostgreSQL schema exactly
 // ─────────────────────────────────────────────
 
 // ─── User ────────────────────────────────────
@@ -25,10 +24,41 @@ export interface Exercise {
   created_by: string | null; // null = system; uuid = custom user exercise
 }
 
+// ─── Routines ────────────────────────────────
+export interface Routine {
+  id: string;
+  user_id: string;
+  name: string; // e.g. "Push Pull Legs"
+  is_active: boolean; // only one routine is active at a time
+  current_day_index: number; // 0-based index into routine_days
+  created_at: string;
+}
+
+export interface RoutineDay {
+  id: string;
+  routine_id: string;
+  day_number: number; // 1-based
+  name: string; // e.g. "Legs", "Push", "Pull"
+  exercises: RoutineDayExercise[];
+}
+
+export interface RoutineDayExercise {
+  id: string;
+  routine_day_id: string;
+  exercise_id: string;
+  exercise_name: string;
+  order_index: number;
+  target_sets: number;
+  target_reps: number;
+  target_weight_kg: number | null;
+}
+
 // ─── Workout (solo) ──────────────────────────
 export interface Workout {
   id: string;
   user_id: string;
+  routine_id: string | null; // linked routine (if any)
+  routine_day_id: string | null; // which day was performed
   name: string;
   started_at: string;
   ended_at: string | null;
@@ -134,25 +164,6 @@ export interface SessionStats {
   hardest_trainer_id: string | null;
 }
 
-// ─── Realtime Payloads ───────────────────────
-// Shape of events broadcast over Supabase Realtime channels
-
-export type RealtimeEventType =
-  | "participant_joined"
-  | "participant_ready"
-  | "participant_left"
-  | "set_logged"
-  | "exercise_advanced"
-  | "session_started"
-  | "session_ended";
-
-export interface RealtimeEvent<T = unknown> {
-  type: RealtimeEventType;
-  payload: T;
-  user_id: string;
-  timestamp: string;
-}
-
 // ─── Navigation param lists ───────────────────
 export type RootStackParamList = {
   Auth: undefined;
@@ -173,8 +184,20 @@ export type AppTabParamList = {
 
 export type HomeStackParamList = {
   Home: undefined;
-  WorkoutLogger: { workoutId?: string };
+  WorkoutLogger: {
+    workoutId?: string;
+    routineDayId?: string;
+    routineDayName?: string;
+  };
   ExerciseSelector: { workoutId: string; workoutExerciseId?: string };
+};
+
+export type WorkoutStackParamList = {
+  RoutineList: undefined;
+  CreateRoutine: { routineId?: string };
+  RoutineDetail: { routineId: string };
+  WorkoutLogger: { routineDayId?: string; routineDayName?: string };
+  ExerciseSelector: { workoutId: string };
 };
 
 export type SessionStackParamList = {
@@ -184,4 +207,5 @@ export type SessionStackParamList = {
   SessionLobby: { sessionId: string };
   ActiveSession: { sessionId: string };
   PostSessionStats: { sessionId: string };
+  SessionHistory: undefined;
 };

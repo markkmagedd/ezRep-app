@@ -13,18 +13,23 @@ import type {
   AppTabParamList,
   HomeStackParamList,
   SessionStackParamList,
+  WorkoutStackParamList,
 } from "@/types";
 
 // Screens
 import HomeScreen from "@/screens/home/HomeScreen";
 import WorkoutLoggerScreen from "@/screens/workout/WorkoutLoggerScreen";
 import ExerciseSelectorScreen from "@/screens/workout/ExerciseSelectorScreen";
+import RoutineListScreen from "@/screens/routine/RoutineListScreen";
+import CreateRoutineScreen from "@/screens/routine/CreateRoutineScreen";
+import RoutineDetailScreen from "@/screens/routine/RoutineDetailScreen";
 import SessionHubScreen from "@/screens/session/SessionHubScreen";
 import CreateSessionScreen from "@/screens/session/CreateSessionScreen";
 import JoinSessionScreen from "@/screens/session/JoinSessionScreen";
 import SessionLobbyScreen from "@/screens/session/SessionLobbyScreen";
 import ActiveSessionScreen from "@/screens/session/ActiveSessionScreen";
 import PostSessionStatsScreen from "@/screens/session/PostSessionStatsScreen";
+import SessionHistoryScreen from "@/screens/session/SessionHistoryScreen";
 import ProfileScreen from "@/screens/profile/ProfileScreen";
 
 // ── Stack navigators ────────────────────────────────────────────────────────
@@ -49,6 +54,39 @@ function HomeStackNavigator() {
         options={{ title: "Add Exercise" }}
       />
     </HomeStack.Navigator>
+  );
+}
+
+const WorkoutStack = createNativeStackNavigator<WorkoutStackParamList>();
+function WorkoutStackNavigator() {
+  return (
+    <WorkoutStack.Navigator screenOptions={stackOptions}>
+      <WorkoutStack.Screen
+        name="RoutineList"
+        component={RoutineListScreen}
+        options={{ headerShown: false }}
+      />
+      <WorkoutStack.Screen
+        name="CreateRoutine"
+        component={CreateRoutineScreen}
+        options={{ headerShown: false }}
+      />
+      <WorkoutStack.Screen
+        name="RoutineDetail"
+        component={RoutineDetailScreen}
+        options={{ headerShown: false }}
+      />
+      <WorkoutStack.Screen
+        name="WorkoutLogger"
+        component={WorkoutLoggerScreen}
+        options={{ title: "Workout" }}
+      />
+      <WorkoutStack.Screen
+        name="ExerciseSelector"
+        component={ExerciseSelectorScreen}
+        options={{ title: "Add Exercise" }}
+      />
+    </WorkoutStack.Navigator>
   );
 }
 
@@ -85,6 +123,11 @@ function SessionStackNavigator() {
         name="PostSessionStats"
         component={PostSessionStatsScreen}
         options={{ title: "Results", headerShown: false }}
+      />
+      <SessionStack.Screen
+        name="SessionHistory"
+        component={SessionHistoryScreen}
+        options={{ title: "All Sessions" }}
       />
     </SessionStack.Navigator>
   );
@@ -127,8 +170,8 @@ export default function AppNavigator() {
       />
       <Tab.Screen
         name="WorkoutTab"
-        component={WorkoutLoggerScreen}
-        options={{ title: "Workout" }}
+        component={WorkoutStackNavigator}
+        options={{ title: "Routines" }}
       />
       <Tab.Screen
         name="ProfileTab"
@@ -142,14 +185,7 @@ export default function AppNavigator() {
 // ── Shared stack screen options ──────────────────────────────────────────────
 
 const stackOptions = {
-  headerStyle: { backgroundColor: Colors.bgCard },
-  headerTintColor: Colors.textPrimary,
-  headerTitleStyle: {
-    color: Colors.textPrimary,
-    fontSize: FontSize.lg,
-    fontWeight: "700" as const,
-  },
-  headerShadowVisible: false,
+  headerShown: false,
   contentStyle: { backgroundColor: Colors.bg },
   animation: "slide_from_right" as const,
 };

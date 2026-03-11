@@ -33,7 +33,7 @@ import { Button } from "@/components/common/Button";
 import { useAuthStore } from "@/store/authStore";
 
 export default function ProfileScreen() {
-  const { profile, updateProfile, signOut, isLoading } = useAuthStore();
+  const { profile, loading, updateProfile, signOut } = useAuthStore();
 
   const [editing, setEditing] = useState(false);
   const [displayName, setDisplayName] = useState(profile?.display_name ?? "");
@@ -63,11 +63,35 @@ export default function ProfileScreen() {
     ]);
   }
 
-  if (!profile) {
+  if (loading) {
     return (
       <SafeAreaView style={styles.safe}>
         <View style={styles.loading}>
           <ActivityIndicator size="large" color={Colors.accent} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!profile) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.loading}>
+          <Text
+            style={{
+              color: Colors.textSecondary,
+              textAlign: "center",
+              marginBottom: 16,
+            }}
+          >
+            Could not load profile.{"\n"}Make sure Firestore is enabled in
+            Firebase Console.
+          </Text>
+          <TouchableOpacity onPress={signOut}>
+            <Text style={{ color: Colors.accent, textAlign: "center" }}>
+              Sign Out
+            </Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
