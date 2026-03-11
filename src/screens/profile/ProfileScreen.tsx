@@ -62,7 +62,7 @@ export default function ProfileScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.safe}>
+      <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
         <View style={styles.loading}>
           <ActivityIndicator size="large" color={Colors.accent} />
         </View>
@@ -72,7 +72,7 @@ export default function ProfileScreen() {
 
   if (!profile) {
     return (
-      <SafeAreaView style={styles.safe}>
+      <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
         <View style={styles.loading}>
           <Text
             style={{
@@ -99,115 +99,111 @@ export default function ProfileScreen() {
     (profile.display_name || profile.username)?.[0]?.toUpperCase() ?? "?";
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
       <View style={styles.content}>
-          {/* ── Avatar + Identity ──────────────────── */}
-          <View style={styles.avatarSection}>
-            <View style={styles.avatarCircle}>
-              <Text style={styles.avatarLetter}>{avatarLetter}</Text>
-            </View>
+        {/* ── Avatar + Identity ──────────────────── */}
+        <View style={styles.avatarSection}>
+          <View style={styles.avatarCircle}>
+            <Text style={styles.avatarLetter}>{avatarLetter}</Text>
+          </View>
 
-            {editing ? (
-              <View style={styles.editRow}>
-                <TextInput
-                  style={styles.displayNameInput}
-                  value={displayName}
-                  onChangeText={setDisplayName}
-                  placeholder="Display name"
-                  placeholderTextColor={Colors.textMuted}
-                  autoFocus
-                  maxLength={30}
-                  returnKeyType="done"
-                  onSubmitEditing={handleSave}
-                />
-                <TouchableOpacity
-                  onPress={handleSave}
-                  disabled={saving}
-                  style={styles.editActionBtn}
-                >
-                  {saving ? (
-                    <ActivityIndicator size="small" color={Colors.accent} />
-                  ) : (
-                    <Ionicons
-                      name="checkmark"
-                      size={22}
-                      color={Colors.accent}
-                    />
-                  )}
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => {
-                    setEditing(false);
-                    setDisplayName(profile.display_name ?? "");
-                  }}
-                  style={styles.editActionBtn}
-                >
-                  <Ionicons name="close" size={22} color={Colors.textMuted} />
-                </TouchableOpacity>
-              </View>
-            ) : (
+          {editing ? (
+            <View style={styles.editRow}>
+              <TextInput
+                style={styles.displayNameInput}
+                value={displayName}
+                onChangeText={setDisplayName}
+                placeholder="Display name"
+                placeholderTextColor={Colors.textMuted}
+                autoFocus
+                maxLength={30}
+                returnKeyType="done"
+                onSubmitEditing={handleSave}
+              />
               <TouchableOpacity
-                style={styles.displayNameRow}
-                onPress={() => setEditing(true)}
-                activeOpacity={0.7}
+                onPress={handleSave}
+                disabled={saving}
+                style={styles.editActionBtn}
               >
-                <Text style={styles.displayName}>
-                  {profile.display_name || profile.username}
-                </Text>
-                <Ionicons
-                  name="pencil-outline"
-                  size={16}
-                  color={Colors.textMuted}
-                  style={{ marginLeft: 6 }}
-                />
+                {saving ? (
+                  <ActivityIndicator size="small" color={Colors.accent} />
+                ) : (
+                  <Ionicons name="checkmark" size={22} color={Colors.accent} />
+                )}
               </TouchableOpacity>
-            )}
+              <TouchableOpacity
+                onPress={() => {
+                  setEditing(false);
+                  setDisplayName(profile.display_name ?? "");
+                }}
+                style={styles.editActionBtn}
+              >
+                <Ionicons name="close" size={22} color={Colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={styles.displayNameRow}
+              onPress={() => setEditing(true)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.displayName}>
+                {profile.display_name || profile.username}
+              </Text>
+              <Ionicons
+                name="pencil-outline"
+                size={16}
+                color={Colors.textMuted}
+                style={{ marginLeft: 6 }}
+              />
+            </TouchableOpacity>
+          )}
 
-            <Text style={styles.username}>@{profile.username}</Text>
-          </View>
-
-          {/* ── Lifetime Stats ─────────────────────── */}
-          <Text style={styles.sectionTitle}>Lifetime Stats</Text>
-          <View style={styles.statsGrid}>
-            <StatCard
-              icon="barbell-outline"
-              label="Total Volume"
-              value={formatVolume(profile.total_volume_kg ?? 0)}
-            />
-            <StatCard
-              icon="people-outline"
-              label="Sessions"
-              value={String(profile.total_sessions ?? 0)}
-            />
-          </View>
-
-          {/* ── Account Details ────────────────────── */}
-          <Text style={styles.sectionTitle}>Account</Text>
-          <Card variant="default" padding="none" style={styles.menuCard}>
-            <MenuItem
-              icon="person-outline"
-              label="Username"
-              detail={`@${profile.username}`}
-            />
-            <View style={styles.menuDivider} />
-            <MenuItem
-              icon="calendar-outline"
-              label="Member since"
-              detail={formatDate(profile.created_at)}
-            />
-          </Card>
-
-          {/* ── Danger Zone ───────────────────────── */}
-          <Button
-            label="Sign Out"
-            onPress={handleSignOut}
-            variant="danger"
-            size="lg"
-            style={{ marginTop: Spacing.md }}
-          />
-
-          <Text style={styles.versionTag}>ezRep • v1.0.0</Text>
+          <Text style={styles.username}>@{profile.username}</Text>
         </View>
+
+        {/* ── Lifetime Stats ─────────────────────── */}
+        <Text style={styles.sectionTitle}>Lifetime Stats</Text>
+        <View style={styles.statsGrid}>
+          <StatCard
+            icon="barbell-outline"
+            label="Total Volume"
+            value={formatVolume(profile.total_volume_kg ?? 0)}
+          />
+          <StatCard
+            icon="people-outline"
+            label="Sessions"
+            value={String(profile.total_sessions ?? 0)}
+          />
+        </View>
+
+        {/* ── Account Details ────────────────────── */}
+        <Text style={styles.sectionTitle}>Account</Text>
+        <Card variant="default" padding="none" style={styles.menuCard}>
+          <MenuItem
+            icon="person-outline"
+            label="Username"
+            detail={`@${profile.username}`}
+          />
+          <View style={styles.menuDivider} />
+          <MenuItem
+            icon="calendar-outline"
+            label="Member since"
+            detail={formatDate(profile.created_at)}
+          />
+        </Card>
+
+        {/* ── Danger Zone ───────────────────────── */}
+        <Button
+          label="Sign Out"
+          onPress={handleSignOut}
+          variant="danger"
+          size="lg"
+          style={{ marginTop: Spacing.md }}
+        />
+
+        <Text style={styles.versionTag}>ezRep • v1.0.0</Text>
+      </View>
     </SafeAreaView>
   );
 }

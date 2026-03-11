@@ -78,7 +78,7 @@ export default function HomeScreen({ navigation }: Props) {
   const totalSessions = profile?.total_sessions ?? 0;
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
       <ScrollView
         contentContainerStyle={styles.scroll}
         refreshControl={

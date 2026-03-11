@@ -1,17 +1,17 @@
 // ─────────────────────────────────────────────
 //  ezRep — Create Session Screen
-//  Host builds the exercise queue, then the session is created in Supabase
+//  Host picks a routine day to use as the workout template.
 // ─────────────────────────────────────────────
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  TextInput,
   Alert,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -25,67 +25,53 @@ import {
 } from "@/constants/theme";
 import { Button } from "@/components/common/Button";
 import { Card } from "@/components/common/Card";
-import {
-  EXERCISE_LIBRARY,
-  EXERCISES_BY_CATEGORY,
-  CATEGORY_LABELS,
-  type ExerciseDef,
-  type ExerciseCategory,
-} from "@/constants/exercises";
+import { useRoutineStore } from "@/store/routineStore";
 import { useSessionStore } from "@/store/sessionStore";
-import type { SessionStackParamList } from "@/types";
+import type { Routine, RoutineDay, SessionStackParamList } from "@/types";
 
 type Props = NativeStackScreenProps<SessionStackParamList, "CreateSession">;
 
-interface QueueItem {
-  exercise: ExerciseDef;
-  targetSets: number;
-  targetReps: string;
-}
-
 export default function CreateSessionScreen({ navigation }: Props) {
-  const [queue, setQueue] = useState<QueueItem[]>([]);
-  const [showPicker, setShowPicker] = useState(false);
-  const [pickerSearch, setPickerSearch] = useState("");
-  const { createSession, isLoading } = useSessionStore();
+  const {
+    routines,
+    routineDetails,
+    isLoading: routineLoading,
+    loadRoutines,
+    loadRoutineDetail,
+  } = useRoutineStore();
+  const { createSession, isLoading: sessionLoading } = useSessionStore();
 
-  function addToQueue(exercise: ExerciseDef) {
-    if (queue.find((q) => q.exercise.id === exercise.id)) return;
-    setQueue((prev) => [
-      ...prev,
-      { exercise, targetSets: 3, targetReps: "8-12" },
-    ]);
-    setShowPicker(false);
-    setPickerSearch("");
-  }
+  const [selectedRoutine, setSelectedRoutine] = useState<Routine | null>(null);
+  const [selectedDay, setSelectedDay] = useState<RoutineDay | null>(null);
 
-  function removeFromQueue(exerciseId: string) {
-    setQueue((prev) => prev.filter((q) => q.exercise.id !== exerciseId));
-  }
+  useEffect(() => {
+    loadRoutines();
+  }, []);
 
-  function updateQueueItem(
-    exerciseId: string,
-    updates: Partial<Pick<QueueItem, "targetSets" | "targetReps">>,
-  ) {
-    setQueue((prev) =>
-      prev.map((q) =>
-        q.exercise.id === exerciseId ? { ...q, ...updates } : q,
-      ),
-    );
+  async function handleSelectRoutine(routine: Routine) {
+    setSelectedRoutine(routine);
+    setSelectedDay(null);
+    if (!routineDetails[routine.id]) {
+      await loadRoutineDetail(routine.id);
+    }
   }
 
   async function handleCreate() {
-    if (queue.length === 0) {
-      Alert.alert("No Exercises", "Add at least one exercise to the queue.");
+    if (!selectedDay) {
+      Alert.alert("No Day Selected", "Please select a workout day.");
+      return;
+    }
+    if (selectedDay.exercises.length === 0) {
+      Alert.alert("Empty Day", "This workout day has no exercises.");
       return;
     }
     try {
       const session = await createSession(
-        queue.map((q) => ({
-          id: q.exercise.id,
-          name: q.exercise.name,
-          targetSets: q.targetSets,
-          targetReps: q.targetReps,
+        selectedDay.exercises.map((ex) => ({
+          id: ex.exercise_id,
+          name: ex.exercise_name,
+          targetSets: ex.target_sets,
+          targetReps: String(ex.target_reps),
         })),
       );
       navigation.replace("SessionLobby", { sessionId: session.id });
@@ -94,11 +80,11 @@ export default function CreateSessionScreen({ navigation }: Props) {
     }
   }
 
-  const filtered = pickerSearch.trim()
-    ? EXERCISE_LIBRARY.filter((e) =>
-        e.name.toLowerCase().includes(pickerSearch.toLowerCase()),
-      )
-    : EXERCISE_LIBRARY;
+  const days: RoutineDay[] = selectedRoutine
+    ? (routineDetails[selectedRoutine.id] ?? [])
+    : [];
+  const loadingDays =
+    selectedRoutine && !routineDetails[selectedRoutine.id] && routineLoading;
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -106,118 +92,208 @@ export default function CreateSessionScreen({ navigation }: Props) {
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.title}>Build Exercise Queue</Text>
+        <Text style={styles.title}>Create Session</Text>
         <Text style={styles.subtitle}>
-          Add exercises in order. Participants will work through them together.
+          Pick a routine and a day to use as the workout template.
         </Text>
 
-        {/* Queue items */}
-        {queue.map((item, index) => (
-          <Card key={item.exercise.id} style={styles.queueItem} padding="md">
-            <View style={styles.queueLeft}>
-              <View style={styles.orderBadge}>
-                <Text style={styles.orderBadgeText}>{index + 1}</Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.queueExName}>{item.exercise.name}</Text>
-                <Text style={styles.queueMeta}>
-                  {item.exercise.muscleGroups.slice(0, 2).join(" · ")}
-                </Text>
-              </View>
-            </View>
+        {/* ── Step 1: Choose Routine ── */}
+        <Text style={styles.stepLabel}>1 — Choose a Routine</Text>
 
-            {/* Sets / reps inline editors */}
-            <View style={styles.queueInputs}>
-              <View style={styles.queueInputGroup}>
-                <Text style={styles.queueInputLabel}>Sets</Text>
-                <TextInput
-                  style={styles.queueInput}
-                  keyboardType="number-pad"
-                  value={String(item.targetSets)}
-                  onChangeText={(v) =>
-                    updateQueueItem(item.exercise.id, {
-                      targetSets: parseInt(v, 10) || 1,
-                    })
-                  }
-                />
-              </View>
-              <View style={styles.queueInputGroup}>
-                <Text style={styles.queueInputLabel}>Reps</Text>
-                <TextInput
-                  style={[styles.queueInput, { width: 60 }]}
-                  value={item.targetReps}
-                  onChangeText={(v) =>
-                    updateQueueItem(item.exercise.id, { targetReps: v })
-                  }
-                  placeholder="8-12"
-                  placeholderTextColor={Colors.textMuted}
-                />
-              </View>
-            </View>
-
-            <TouchableOpacity
-              onPress={() => removeFromQueue(item.exercise.id)}
-              style={styles.removeBtn}
-            >
-              <Ionicons name="trash-outline" size={18} color={Colors.danger} />
-            </TouchableOpacity>
+        {routineLoading && routines.length === 0 ? (
+          <ActivityIndicator
+            color={Colors.accent}
+            style={{ marginVertical: Spacing.lg }}
+          />
+        ) : routines.length === 0 ? (
+          <Card variant="default" padding="md" style={styles.emptyCard}>
+            <Ionicons
+              name="barbell-outline"
+              size={32}
+              color={Colors.textMuted}
+            />
+            <Text style={styles.emptyText}>
+              You have no routines yet.{"\n"}Create one in the Routines tab
+              first.
+            </Text>
           </Card>
-        ))}
-
-        {/* Add Exercise button */}
-        <TouchableOpacity
-          style={styles.addExBtn}
-          onPress={() => setShowPicker(true)}
-        >
-          <Ionicons name="add-circle" size={22} color={Colors.accent} />
-          <Text style={styles.addExText}>Add Exercise</Text>
-        </TouchableOpacity>
-
-        {/* Exercise picker (inline for simplicity) */}
-        {showPicker && (
-          <Card style={styles.picker} padding="md">
-            <View style={styles.pickerSearch}>
-              <Ionicons name="search" size={16} color={Colors.textMuted} />
-              <TextInput
-                style={styles.pickerInput}
-                placeholder="Search exercises..."
-                placeholderTextColor={Colors.textMuted}
-                value={pickerSearch}
-                onChangeText={setPickerSearch}
-                autoFocus
-              />
-              <TouchableOpacity onPress={() => setShowPicker(false)}>
-                <Ionicons name="close" size={18} color={Colors.textMuted} />
-              </TouchableOpacity>
-            </View>
-            {filtered.slice(0, 10).map((ex) => (
+        ) : (
+          routines.map((r) => {
+            const active = selectedRoutine?.id === r.id;
+            return (
               <TouchableOpacity
-                key={ex.id}
-                style={styles.pickerRow}
-                onPress={() => addToQueue(ex)}
+                key={r.id}
+                activeOpacity={0.8}
+                onPress={() => handleSelectRoutine(r)}
               >
-                <Text style={styles.pickerName}>{ex.name}</Text>
-                <Text style={styles.pickerMeta}>
-                  {ex.category} · {ex.equipment}
-                </Text>
+                <Card
+                  variant={active ? "accent" : "default"}
+                  padding="md"
+                  style={styles.routineCard}
+                >
+                  <View
+                    style={[
+                      styles.iconBox,
+                      active && { backgroundColor: Colors.accentMuted },
+                    ]}
+                  >
+                    <Ionicons
+                      name="calendar-outline"
+                      size={22}
+                      color={active ? Colors.accent : Colors.textMuted}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[
+                        styles.routineName,
+                        active && { color: Colors.accent },
+                      ]}
+                    >
+                      {r.name}
+                    </Text>
+                    {r.is_active && (
+                      <Text style={styles.activeBadge}>Active routine</Text>
+                    )}
+                  </View>
+                  {active && (
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={22}
+                      color={Colors.accent}
+                    />
+                  )}
+                </Card>
               </TouchableOpacity>
-            ))}
-          </Card>
+            );
+          })
         )}
 
-        <View style={{ height: Spacing.xxl }} />
+        {/* ── Step 2: Choose Day ── */}
+        {selectedRoutine && (
+          <>
+            <Text style={[styles.stepLabel, { marginTop: Spacing.xl }]}>
+              2 — Choose a Day
+            </Text>
+            {loadingDays ? (
+              <ActivityIndicator
+                color={Colors.accent}
+                style={{ marginVertical: Spacing.lg }}
+              />
+            ) : days.length === 0 ? (
+              <Card variant="default" padding="md" style={styles.emptyCard}>
+                <Text style={styles.emptyText}>
+                  This routine has no days configured.
+                </Text>
+              </Card>
+            ) : (
+              days.map((day) => {
+                const active = selectedDay?.id === day.id;
+                return (
+                  <TouchableOpacity
+                    key={day.id}
+                    activeOpacity={0.8}
+                    onPress={() => setSelectedDay(day)}
+                  >
+                    <Card
+                      variant={active ? "accent" : "default"}
+                      padding="md"
+                      style={styles.routineCard}
+                    >
+                      <View
+                        style={[
+                          styles.iconBox,
+                          active && { backgroundColor: Colors.accentMuted },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.dayNum,
+                            active && { color: Colors.accent },
+                          ]}
+                        >
+                          D{day.day_number}
+                        </Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text
+                          style={[
+                            styles.routineName,
+                            active && { color: Colors.accent },
+                          ]}
+                        >
+                          {day.name}
+                        </Text>
+                        <Text style={styles.activeBadge}>
+                          {day.exercises.length} exercise
+                          {day.exercises.length !== 1 ? "s" : ""}
+                        </Text>
+                      </View>
+                      {active && (
+                        <Ionicons
+                          name="checkmark-circle"
+                          size={22}
+                          color={Colors.accent}
+                        />
+                      )}
+                    </Card>
+                  </TouchableOpacity>
+                );
+              })
+            )}
+          </>
+        )}
+
+        {/* ── Step 3: Preview ── */}
+        {selectedDay && selectedDay.exercises.length > 0 && (
+          <>
+            <Text style={[styles.stepLabel, { marginTop: Spacing.xl }]}>
+              3 — Exercises
+            </Text>
+            <Card variant="default" padding="none" style={styles.previewCard}>
+              {selectedDay.exercises.map((ex, i) => (
+                <View
+                  key={ex.id}
+                  style={[
+                    styles.previewRow,
+                    i > 0 && {
+                      borderTopWidth: 1,
+                      borderTopColor: Colors.border,
+                    },
+                  ]}
+                >
+                  <View style={styles.previewBadge}>
+                    <Text style={styles.previewBadgeText}>{i + 1}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.previewName}>{ex.exercise_name}</Text>
+                    <Text style={styles.previewMeta}>
+                      {ex.target_sets} sets × {ex.target_reps} reps
+                      {ex.target_weight_kg ? ` @ ${ex.target_weight_kg}kg` : ""}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </Card>
+          </>
+        )}
+
+        <View style={{ height: 120 }} />
       </ScrollView>
 
-      {/* Sticky footer */}
       <View style={styles.footer}>
-        <Text style={styles.footerMeta}>
-          {queue.length} exercise{queue.length !== 1 ? "s" : ""} in queue
-        </Text>
+        {selectedDay && (
+          <Text style={styles.footerMeta}>
+            {selectedDay.exercises.length} exercise
+            {selectedDay.exercises.length !== 1 ? "s" : ""} •{" "}
+            {selectedRoutine?.name} — {selectedDay.name}
+          </Text>
+        )}
         <Button
-          label={isLoading ? "Creating…" : "Create Session →"}
+          label={sessionLoading ? "Creating…" : "Create Session →"}
           onPress={handleCreate}
-          loading={isLoading}
-          disabled={queue.length === 0}
+          loading={sessionLoading}
+          disabled={!selectedDay || sessionLoading}
           size="lg"
         />
       </View>
@@ -227,7 +303,7 @@ export default function CreateSessionScreen({ navigation }: Props) {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.bg },
-  scroll: { padding: Spacing.md, paddingBottom: 120 },
+  scroll: { padding: Spacing.md, paddingBottom: 140 },
 
   title: {
     color: Colors.textPrimary,
@@ -242,113 +318,78 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xl,
     lineHeight: 18,
   },
-
-  queueItem: { marginBottom: Spacing.sm },
-  queueLeft: {
-    flexDirection: "row",
+  stepLabel: {
+    color: Colors.textMuted,
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.bold,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    marginBottom: Spacing.sm,
+  },
+  emptyCard: {
     alignItems: "center",
     gap: Spacing.sm,
     marginBottom: Spacing.sm,
   },
-  orderBadge: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+  emptyText: {
+    color: Colors.textMuted,
+    fontSize: FontSize.sm,
+    textAlign: "center",
+    lineHeight: 20,
+  },
+
+  routineCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.md,
+    marginBottom: Spacing.sm,
+  },
+  iconBox: {
+    width: 42,
+    height: 42,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.bgSurface,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  routineName: {
+    color: Colors.textPrimary,
+    fontSize: FontSize.md,
+    fontWeight: FontWeight.bold,
+  },
+  activeBadge: { color: Colors.textMuted, fontSize: FontSize.xs, marginTop: 2 },
+  dayNum: {
+    color: Colors.textMuted,
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.black,
+  },
+
+  previewCard: { overflow: "hidden", marginBottom: Spacing.sm },
+  previewRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.md,
+    padding: Spacing.md,
+  },
+  previewBadge: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     backgroundColor: Colors.accentMuted,
     alignItems: "center",
     justifyContent: "center",
   },
-  orderBadgeText: {
+  previewBadgeText: {
     color: Colors.accent,
-    fontSize: FontSize.sm,
+    fontSize: FontSize.xs,
     fontWeight: FontWeight.black,
   },
-  queueExName: {
-    color: Colors.textPrimary,
-    fontSize: FontSize.md,
-    fontWeight: FontWeight.bold,
-  },
-  queueMeta: {
-    color: Colors.textMuted,
-    fontSize: FontSize.xs,
-    marginTop: 2,
-  },
-  queueInputs: {
-    flexDirection: "row",
-    gap: Spacing.md,
-    marginBottom: Spacing.xs,
-  },
-  queueInputGroup: { alignItems: "center", gap: 4 },
-  queueInputLabel: {
-    color: Colors.textMuted,
-    fontSize: FontSize.xs,
-    textTransform: "uppercase",
-  },
-  queueInput: {
-    color: Colors.textPrimary,
-    fontSize: FontSize.md,
-    fontWeight: FontWeight.semibold,
-    backgroundColor: Colors.bgSurface,
-    borderRadius: Radius.sm,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 6,
-    width: 44,
-    textAlign: "center",
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  removeBtn: { alignSelf: "flex-end", padding: 4 },
-
-  addExBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: Spacing.sm,
-    backgroundColor: Colors.bgCard,
-    borderRadius: Radius.lg,
-    borderWidth: 1.5,
-    borderColor: Colors.accent,
-    borderStyle: "dashed",
-    paddingVertical: Spacing.md,
-    marginTop: Spacing.sm,
-    marginBottom: Spacing.md,
-  },
-  addExText: {
-    color: Colors.accent,
-    fontSize: FontSize.md,
-    fontWeight: FontWeight.bold,
-  },
-
-  picker: { marginTop: Spacing.sm },
-  pickerSearch: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.sm,
-    marginBottom: Spacing.sm,
-    backgroundColor: Colors.bgSurface,
-    borderRadius: Radius.sm,
-    padding: Spacing.sm,
-  },
-  pickerInput: {
-    flex: 1,
-    color: Colors.textPrimary,
-    fontSize: FontSize.sm,
-  },
-  pickerRow: {
-    paddingVertical: Spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
-  },
-  pickerName: {
+  previewName: {
     color: Colors.textPrimary,
     fontSize: FontSize.md,
     fontWeight: FontWeight.semibold,
   },
-  pickerMeta: {
-    color: Colors.textMuted,
-    fontSize: FontSize.xs,
-    marginTop: 2,
-  },
+  previewMeta: { color: Colors.textMuted, fontSize: FontSize.xs, marginTop: 2 },
 
   footer: {
     position: "absolute",

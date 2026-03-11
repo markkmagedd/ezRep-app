@@ -195,9 +195,8 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.bgCard,
     borderTopColor: Colors.border,
     borderTopWidth: 1,
-    height: Platform.OS === "ios" ? 80 : 60,
-    paddingBottom: Platform.OS === "ios" ? 20 : 8,
-    paddingTop: 0,
+    paddingBottom: Platform.OS === "ios" ? 28 : 8,
+    paddingTop: 8,
   },
   tabBarBg: {
     flex: 1,

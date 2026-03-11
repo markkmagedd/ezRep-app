@@ -51,7 +51,7 @@ export default function SessionHubScreen({ navigation }: Props) {
   }, []);
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
       {/* ── Header ──────────────────────────────────────────── */}
       <View style={styles.hero}>
         <Text style={styles.heroTitle}>Sessions</Text>
