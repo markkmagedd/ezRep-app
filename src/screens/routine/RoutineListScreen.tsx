@@ -128,13 +128,10 @@ export default function RoutineListScreen({ navigation }: Props) {
     : 0;
   const todayDay = activeDays[todayIndex];
 
-  // ── Sort routines: Active at top ──
-  const sortedRoutines = React.useMemo(() => {
-    return [...routines].sort((a, b) => {
-      if (a.id === activeRoutine?.id) return -1;
-      if (b.id === activeRoutine?.id) return 1;
-      return 0;
-    });
+  // ── Filter out active routine from list (it's shown in the card above) ──
+  const filteredRoutines = React.useMemo(() => {
+    if (!activeRoutine) return routines;
+    return routines.filter((r) => r.id !== activeRoutine.id);
   }, [routines, activeRoutine?.id]);
 
   return (
@@ -183,6 +180,12 @@ export default function RoutineListScreen({ navigation }: Props) {
                   size="lg"
                   style={{ marginTop: Spacing.md }}
                 />
+                <TouchableOpacity
+                  onPress={() => navigation.navigate("RoutineDetail", { routineId: activeRoutine.id })}
+                  style={{ alignSelf: "center", marginTop: Spacing.sm }}
+                >
+                  <Text style={{ color: Colors.textMuted, fontSize: FontSize.sm }}>View Details</Text>
+                </TouchableOpacity>
               </>
             ) : (
               <Text style={styles.todayNoDays}>
@@ -201,7 +204,7 @@ export default function RoutineListScreen({ navigation }: Props) {
       )}
 
       <FlatList
-        data={sortedRoutines}
+        data={filteredRoutines}
         keyExtractor={(r) => r.id}
         refreshControl={
           <RefreshControl
@@ -242,7 +245,7 @@ export default function RoutineListScreen({ navigation }: Props) {
 
           return (
             <Card
-              variant={isActive ? "accent" : "default"}
+              variant="default"
               padding="md"
               style={styles.routineCard}
             >
@@ -291,15 +294,16 @@ export default function RoutineListScreen({ navigation }: Props) {
 
                 {/* Right: actions */}
                 <View style={styles.cardActions}>
-                  {!isActive && (
-                    <TouchableOpacity
-                      style={styles.activateBtn}
-                      onPress={() => handleActivate(routine)}
-                    >
-                      <Ionicons name="flash" size={12} color={Colors.bg} />
-                      <Text style={styles.activateBtnText}>Set Active</Text>
-                    </TouchableOpacity>
-                  )}
+                  <TouchableOpacity
+                    style={styles.actionBtn}
+                    onPress={() => !isActive && handleActivate(routine)}
+                  >
+                    <Ionicons
+                      name={isActive ? "star" : "star-outline"}
+                      size={22}
+                      color={isActive ? Colors.accent : Colors.textMuted}
+                    />
+                  </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.actionBtn}
                     onPress={() => handleDelete(routine)}
