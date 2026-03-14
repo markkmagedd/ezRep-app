@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ExerciseRecord",
+  "description": "JSON schema for the local static exercise library used in the ezRep app.",
+  "type": "object",
+  "properties": {
+    "exerciseId": { "type": "string" },
+    "name": { "type": "string" },
+    "imageUrl": { "type": "string" },
+    "videoUrl": { "type": "string" },
+    "equipments": { "type": "array", "items": { "type": "string" } },
+    "bodyParts": { "type": "array", "items": { "type": "string" } },
+    "gender": { "type": "string", "enum": ["male", "female", "unisex"] },
+    "exerciseType": { "type": "string" },
+    "targetMuscles": { "type": "array", "items": { "type": "string" } },
+    "secondaryMuscles": { "type": "array", "items": { "type": "string" } },
+    "keywords": { "type": "array", "items": { "type": "string" } },
+    "overview": { "type": "string" },
+    "instructions": { "type": "array", "items": { "type": "string" } },
+    "exerciseTips": { "type": "array", "items": { "type": "string" } },
+    "variations": { "type": "array", "items": { "type": "string" } },
+    "relatedIds": { "type": "array", "items": { "type": "string" } }
+  },
+  "required": ["exerciseId", "name", "bodyParts", "instructions", "targetMuscles"]
+}

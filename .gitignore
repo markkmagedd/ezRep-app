@@ -27,3 +27,22 @@ yarn-error.log*
 
 # EAS
 .easignore
+
+# Editor/IDE
+.vscode/
+.idea/
+
+# Build artifacts & caches
+build/
+coverage/
+.expo-shared/
+android/.gradle/
+android/build/
+ios/build/
+ios/Pods/
+
+# Agent Meta-folders
+.agent/
+.gemini/
+.antigravity/
+.specify/

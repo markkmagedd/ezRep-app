@@ -16,6 +16,11 @@ import {
   Radius,
 } from "@/constants/theme";
 import { Card } from "@/components/common/Card";
+import { 
+  ScrollView, 
+  ActivityIndicator, 
+  RefreshControl 
+} from "react-native";
 import { useSessionStore } from "@/store/sessionStore";
 import type { SessionStackParamList } from "@/types";
 
@@ -44,7 +49,7 @@ function formatDate(iso: string): string {
 
 export default function SessionHubScreen({ navigation }: Props) {
   const { history, isLoading, loadHistory } = useSessionStore();
-  const recent = history.slice(0, 3);
+  const recent = (history || []).slice(0, 3);
 
   useEffect(() => {
     loadHistory();
@@ -52,116 +57,133 @@ export default function SessionHubScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
-      {/* ── Header ──────────────────────────────────────────── */}
-      <View style={styles.hero}>
-        <Text style={styles.heroTitle}>Sessions</Text>
-        <Text style={styles.heroSub}>
-          Train together, compete harder.{"\n"}Real-time shared workouts.
-        </Text>
-      </View>
-
-      {/* ── Action cards ────────────────────────────────────── */}
-      <TouchableOpacity
-        activeOpacity={0.85}
-        onPress={() => navigation.navigate("CreateSession")}
+      <ScrollView 
+        contentContainerStyle={styles.scroll}
+        refreshControl={
+          <RefreshControl 
+            refreshing={isLoading} 
+            onRefresh={loadHistory} 
+            tintColor={Colors.accent}
+          />
+        }
       >
-        <Card variant="accent" style={styles.bigCard}>
-          <View
-            style={[
-              styles.bigCardIcon,
-              { backgroundColor: Colors.accentMuted },
-            ]}
-          >
-            <Ionicons name="add-circle" size={40} color={Colors.accent} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.bigCardTitle}>Create Session</Text>
-            <Text style={styles.bigCardSub}>
-              Build the workout queue, invite friends, and host the party.
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={22} color={Colors.accent} />
-        </Card>
-      </TouchableOpacity>
+        {/* ── Header ──────────────────────────────────────────── */}
+        <View style={styles.hero}>
+          <Text style={styles.heroTitle}>Sessions</Text>
+          <Text style={styles.heroSub}>
+            Train together, compete harder.{"\n"}Real-time shared workouts.
+          </Text>
+        </View>
 
-      <TouchableOpacity
-        activeOpacity={0.85}
-        onPress={() => navigation.navigate("JoinSession", {})}
-        style={{ marginTop: Spacing.md }}
-      >
-        <Card style={styles.bigCard}>
-          <View
-            style={[styles.bigCardIcon, { backgroundColor: Colors.bgSurface }]}
-          >
-            <Ionicons name="enter-outline" size={40} color={Colors.cyan} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.bigCardTitle}>Join Session</Text>
-            <Text style={styles.bigCardSub}>
-              Enter a 6-character invite code to join a friend's session.
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={22} color={Colors.textMuted} />
-        </Card>
-      </TouchableOpacity>
+        {/* ── Action cards ────────────────────────────────────── */}
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={() => navigation.navigate("CreateSession")}
+        >
+          <Card variant="accent" style={styles.bigCard}>
+            <View
+              style={[
+                styles.bigCardIcon,
+                { backgroundColor: Colors.accentMuted },
+              ]}
+            >
+              <Ionicons name="add-circle" size={40} color={Colors.accent} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.bigCardTitle}>Create Session</Text>
+              <Text style={styles.bigCardSub}>
+                Build the workout queue, invite friends, and host the party.
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={22} color={Colors.accent} />
+          </Card>
+        </TouchableOpacity>
 
-      {/* ── Past Sessions ────────────────────────────────────── */}
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Past Sessions</Text>
-        {history.length > 3 && (
-          <TouchableOpacity
-            onPress={() => navigation.navigate("SessionHistory")}
-          >
-            <Text style={styles.seeAll}>See All</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={() => navigation.navigate("JoinSession", {})}
+          style={{ marginTop: Spacing.md }}
+        >
+          <Card style={styles.bigCard}>
+            <View
+              style={[styles.bigCardIcon, { backgroundColor: Colors.bgSurface }]}
+            >
+              <Ionicons name="enter-outline" size={40} color={Colors.cyan} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.bigCardTitle}>Join Session</Text>
+              <Text style={styles.bigCardSub}>
+                Enter a 6-character invite code to join a friend's session.
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={22} color={Colors.textMuted} />
+          </Card>
+        </TouchableOpacity>
 
-      {isLoading ? null : recent.length === 0 ? (
-        <Text style={styles.emptyText}>No completed sessions yet.</Text>
-      ) : (
-        recent.map((s) => (
-          <TouchableOpacity
-            key={s.id}
-            activeOpacity={0.8}
-            onPress={() =>
-              navigation.navigate("PostSessionStats", { sessionId: s.id })
-            }
-            style={{ marginBottom: Spacing.sm }}
-          >
-            <Card variant="default" padding="md" style={styles.historyRow}>
-              <View style={styles.historyIcon}>
-                <Ionicons
-                  name="trophy-outline"
-                  size={20}
-                  color={Colors.accent}
-                />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.historyDate}>
-                  {formatDate(s.ended_at ?? s.created_at)}
-                </Text>
-                {s.started_at && s.ended_at && (
-                  <Text style={styles.historyMeta}>
-                    Duration: {formatDuration(s.started_at, s.ended_at)}
+        {/* ── Past Sessions ────────────────────────────────────── */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Past Sessions</Text>
+          {history.length > 3 && (
+            <TouchableOpacity
+              onPress={() => navigation.navigate("SessionHistory")}
+            >
+              <Text style={styles.seeAll}>See All</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {isLoading && history.length === 0 ? (
+          <View style={styles.center}>
+            <ActivityIndicator color={Colors.accent} />
+          </View>
+        ) : recent.length === 0 ? (
+          <Text style={styles.emptyText}>No completed sessions yet.</Text>
+        ) : (
+          recent.map((s) => (
+            <TouchableOpacity
+              key={s.id}
+              activeOpacity={0.8}
+              onPress={() =>
+                navigation.navigate("PostSessionStats", { sessionId: s.id })
+              }
+              style={{ marginBottom: Spacing.sm }}
+            >
+              <Card variant="default" padding="md" style={styles.historyRow}>
+                <View style={styles.historyIcon}>
+                  <Ionicons
+                    name="trophy-outline"
+                    size={20}
+                    color={Colors.accent}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.historyDate}>
+                    {formatDate(s.ended_at ?? s.created_at)}
                   </Text>
-                )}
-              </View>
-              <Ionicons
-                name="chevron-forward"
-                size={18}
-                color={Colors.textMuted}
-              />
-            </Card>
-          </TouchableOpacity>
-        ))
-      )}
+                  {s.started_at && s.ended_at && (
+                    <Text style={styles.historyMeta}>
+                      Duration: {formatDuration(s.started_at, s.ended_at)}
+                    </Text>
+                  )}
+                </View>
+                <Ionicons
+                  name="chevron-forward"
+                  size={18}
+                  color={Colors.textMuted}
+                />
+              </Card>
+            </TouchableOpacity>
+          ))
+        )}
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: Colors.bg, padding: Spacing.md },
+  safe: { flex: 1, backgroundColor: Colors.bg },
+  scroll: { padding: Spacing.md, paddingBottom: Spacing.xxl },
+  center: { padding: Spacing.xl, alignItems: "center", justifyContent: "center" },
 
   hero: { marginTop: Spacing.sm, marginBottom: Spacing.xl },
   heroTitle: {

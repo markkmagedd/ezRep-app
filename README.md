@@ -1,6 +1,6 @@
 # ezRep 🏋️
 
-**A real-time social gym workout tracker built with React Native + Expo + Supabase.**
+**A real-time social gym workout tracker built with React Native + Expo + Firebase.**
 
 Train solo or create a shared **Session** and compete rep-for-rep with your gym crew in real time.
 
@@ -22,12 +22,12 @@ Train solo or create a shared **Session** and compete rep-for-rep with your gym 
 
 | Layer          | Technology                                      |
 | -------------- | ----------------------------------------------- |
-| Framework      | React Native 0.73 + Expo SDK 50                 |
+| Framework      | React Native 0.73 + Expo SDK 54                 |
 | Navigation     | React Navigation 6 (native-stack + bottom-tabs) |
 | State          | Zustand 4.5                                     |
-| Backend / Auth | Supabase (PostgreSQL + Auth + Realtime)         |
-| Realtime       | Supabase Realtime **Broadcast** channels        |
-| Storage        | expo-secure-store (auth tokens)                 |
+| Backend / Auth | Firebase (Firestore + Auth)                     |
+| Realtime       | Firestore `onSnapshot` listeners                |
+| Storage        | expo-secure-store (persistence)                 |
 | Language       | TypeScript (strict)                             |
 
 ---
@@ -42,8 +42,7 @@ ezRep-app/
 ├── tsconfig.json                  # TypeScript config
 ├── .env.example                   # Required env vars
 │
-├── supabase/
-│   └── schema.sql                 # Full Supabase schema (run once)
+├── firestore.rules                # Firebase Security Rules
 │
 └── src/
     ├── constants/
@@ -54,7 +53,7 @@ ezRep-app/
     │   └── index.ts               # All TypeScript interfaces + nav param lists
     │
     ├── lib/
-    │   └── supabase.ts            # Supabase client singleton + DB helpers
+    │   └── firebase.ts            # Firebase client singleton + DB helpers
     │
     ├── store/
     │   ├── authStore.ts           # Auth state (Zustand)
@@ -103,7 +102,7 @@ ezRep-app/
 
 - Node.js ≥ 18
 - Expo CLI: `npm i -g expo-cli`
-- A [Supabase](https://supabase.com) project
+- A [Firebase](https://firebase.google.com) project
 
 ### 2. Clone & Install
 
@@ -113,11 +112,12 @@ cd ezRep-app
 npm install
 ```
 
-### 3. Set Up Supabase
+### 3. Set Up Firebase
 
-1. Create a new Supabase project at [supabase.com](https://supabase.com)
-2. Go to **SQL Editor** and run the contents of `supabase/schema.sql`
-3. Copy your project **URL** and **anon key** from **Settings → API**
+1. Create a new Firebase project at [firebase.google.com](https://firebase.google.com)
+2. Enable **Authentication** (Email/Password)
+3. Enable **Cloud Firestore**
+4. Copy your project configuration keys to `.env`
 
 ### 4. Configure Environment
 
@@ -128,8 +128,12 @@ cp .env.example .env
 Edit `.env`:
 
 ```env
-EXPO_PUBLIC_SUPABASE_URL=https://xxxxxxxxxxxxxxxxxxxx.supabase.co
-EXPO_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+EXPO_PUBLIC_FIREBASE_API_KEY=AIza...
+EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=ezrep-app.firebaseapp.com
+EXPO_PUBLIC_FIREBASE_PROJECT_ID=ezrep-app
+EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=ezrep-app.appspot.com
+EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=1234567890
+EXPO_PUBLIC_FIREBASE_APP_ID=1:1234567890:web:abcdef123456
 ```
 
 ### 5. Start the App
@@ -145,73 +149,23 @@ Scan the QR code with **Expo Go** on your phone, or press `i` for iOS Simulator 
 ## Real-time Session Architecture
 
 ```
-Host                              Supabase Realtime               Participant(s)
-─────                             ─────────────────               ─────────────
-createSession()  ──────────────►  broadcast channel               joinSession()
-  (DB: sessions, session_exercises,                               (DB: session_participants)
-   session_participants)
-                                                                  setReady() ──► participant_ready
-startSession() ──────────────────────────────────────────────►   session_started
-  (DB: sessions.status = 'active')
-                                                                  logSet() ─────► set_logged
-logSet() ────────────────────────────────────────────────────►   (DB: session_sets)
-  (DB: session_sets)
-
-advanceExercise() ───────────────────────────────────────────►   exercise_advanced
-  (DB: sessions.current_exercise_index++)
-
-endSession() ────────────────────────────────────────────────►   session_ended
-  (DB: sessions.status = 'completed')
-
-loadStats(sessionId) ◄──── all clients fetch stats from DB
+Host                              Firebase Firestore               Participant(s)
+─────                             ──────────────────               ─────────────
+createSession()  ──────────────►  doc(/sessions/...)  ◄───────────  joinSession()
+  (Sub: participants, exercises)
+                                                                   setReady()
+                                  onSnapshot() ◄────────────┐      (updateDoc)
+                                                            │
+startSession() ────────────────►  status = 'active'  ───────┤
+                                                            │
+logSet() ──────────────────────►  addDoc(/sets) ────────────┤      logSet()
+                                                            │
+advanceExercise() ─────────────►  index++ ──────────────────┤
+                                                            │
+endSession() ──────────────────►  status = 'completed'  ────┘
 ```
 
-All real-time events are **broadcast** (ephemeral, no DB polling). The DB write happens alongside each broadcast for persistence, and `loadStats()` re-derives everything from the DB for the results screen.
-
----
-
-## Database Schema (summary)
-
-| Table                  | Purpose                                  |
-| ---------------------- | ---------------------------------------- |
-| `profiles`             | User account info + lifetime stats       |
-| `workouts`             | Solo workout sessions                    |
-| `workout_exercises`    | Exercises within a solo workout          |
-| `workout_sets`         | Individual sets within workout exercises |
-| `sessions`             | Group workout rooms (code, status, host) |
-| `session_participants` | Who joined, their color, ready status    |
-| `session_exercises`    | Exercise queue for the session           |
-| `session_sets`         | Individual sets logged during a session  |
-
-Row-Level Security is enabled on all tables. See `supabase/schema.sql` for full policies.
-
----
-
-## Supabase Realtime Setup
-
-Ensure **Realtime** is enabled for your project:
-
-1. Go to **Database → Replication** in your Supabase dashboard
-2. Enable realtime for: `sessions`, `session_participants`, `session_sets`
-
-This is handled automatically if you run `schema.sql` (the `alter publication` statements at the bottom).
-
----
-
-## Design System
-
-All design tokens live in `src/constants/theme.ts`:
-
-| Token               | Value                                     |
-| ------------------- | ----------------------------------------- |
-| `Colors.accent`     | `#C6F135` (electric lime)                 |
-| `Colors.secondary`  | `#00E5FF` (cyan)                          |
-| `Colors.bg`         | `#0D0D0D`                                 |
-| `Colors.bgSurface`  | `#1A1A1A`                                 |
-| `Colors.bgElevated` | `#242424`                                 |
-| `Colors.warning`    | `#FF9F0A`                                 |
-| `Colors.error`      | `#FF453A`                                 |
-| Participant colors  | 6 unique colors (`Colors.participants[]`) |
+All real-time events are handled via **Firestore Realtime Listeners**. Participants subscribe to the session document and its sets collection for low-latency synchronization.
 
 ---
 

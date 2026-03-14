@@ -6,6 +6,7 @@
 // ─────────────────────────────────────────────
 
 import { initializeApp } from "firebase/app";
+// @ts-ignore
 import { initializeAuth, getReactNativePersistence } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -28,7 +29,7 @@ if (!firebaseConfig.apiKey) {
 
 export const app = initializeApp(firebaseConfig);
 
-// initializeAuth (not getAuth) lets us inject AsyncStorage persistence
+// Initialize Auth with AsyncStorage persistence for React Native
 export const auth = initializeAuth(app, {
   persistence: getReactNativePersistence(AsyncStorage),
 });

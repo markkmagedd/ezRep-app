@@ -57,7 +57,10 @@ interface WorkoutState {
   exercises: DraftExercise[];
   startedAt: Date | null;
   linkedRoutineId: string | null;
-  sheetExpanded: boolean;
+  workoutMinimized: boolean;
+  isPaused: boolean;
+  pausedMs: number;
+  pauseStartedAt: number | null;
   isLoading: boolean;
   error: string | null;
 
@@ -67,6 +70,7 @@ interface WorkoutState {
   // Actions
   startWorkout: (options?: StartWorkoutOptions) => Promise<string>; // returns workoutId
   addExercise: (exerciseId: string, exerciseName: string) => string;
+  addExercises: (items: { id: string; name: string }[]) => void;
   removeExercise: (workoutExerciseId: string) => void;
   reorderExercises: (from: number, to: number) => void;
 
@@ -81,8 +85,10 @@ interface WorkoutState {
 
   finishWorkout: () => Promise<void>;
   discardWorkout: () => void;
-  expandWorkout: () => void;
-  collapseWorkout: () => void;
+  minimizeWorkout: () => void;
+  resumeWorkout: () => void;
+  pauseWorkout: () => void;
+  unpauseWorkout: () => void;
 
   loadRecentWorkouts: (limit?: number) => Promise<void>;
   loadWorkout: (workoutId: string) => Promise<void>;
@@ -104,6 +110,7 @@ function docToWorkout(id: string, data: Record<string, any>): Workout {
     ended_at: data.ended_at?.toDate?.()?.toISOString() ?? null,
     total_volume_kg: data.total_volume_kg ?? 0,
     notes: data.notes ?? null,
+    exercises: data.exercises ?? [],
   };
 }
 
@@ -112,7 +119,10 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
   exercises: [],
   startedAt: null,
   linkedRoutineId: null,
-  sheetExpanded: false,
+  workoutMinimized: false,
+  isPaused: false,
+  pausedMs: 0,
+  pauseStartedAt: null,
   isLoading: false,
   error: null,
   recentWorkouts: [],
@@ -153,7 +163,6 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
       exercises: [],
       startedAt,
       linkedRoutineId: routineId ?? null,
-      sheetExpanded: true,
       error: null,
     });
 
@@ -216,6 +225,29 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
 
     set({ exercises: [...exercises, newExercise] });
     return id;
+  },
+
+  // ── addExercises ─────────────────────────────────────────────────────────
+  addExercises: (items) => {
+    const { exercises } = get();
+    const newDrafts: DraftExercise[] = items.map((item, i) => ({
+      id: uid(),
+      exercise_id: item.id,
+      exercise_name: item.name,
+      order_index: exercises.length + i,
+      sets: [
+        {
+          id: uid(),
+          set_index: 1,
+          reps: null,
+          weight_kg: null,
+          is_warmup: false,
+          completed: false,
+        },
+      ],
+    }));
+
+    set({ exercises: [...exercises, ...newDrafts] });
   },
 
   // ── removeExercise ───────────────────────────────────────────────────────
@@ -375,7 +407,10 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
         exercises: [],
         startedAt: null,
         linkedRoutineId: null,
-        sheetExpanded: false,
+        workoutMinimized: false,
+        isPaused: false,
+        pausedMs: 0,
+        pauseStartedAt: null,
         isLoading: false,
       });
     } catch (err: unknown) {
@@ -398,13 +433,22 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
       exercises: [],
       startedAt: null,
       linkedRoutineId: null,
-      sheetExpanded: false,
+      workoutMinimized: false,
+      isPaused: false,
+      pausedMs: 0,
+      pauseStartedAt: null,
       error: null,
     });
   },
 
-  expandWorkout: () => set({ sheetExpanded: true }),
-  collapseWorkout: () => set({ sheetExpanded: false }),
+  minimizeWorkout: () => set({ workoutMinimized: true }),
+  resumeWorkout: () => set({ workoutMinimized: false }),
+  pauseWorkout: () => set({ isPaused: true, pauseStartedAt: Date.now() }),
+  unpauseWorkout: () => {
+    const { pausedMs, pauseStartedAt } = get();
+    const extra = pauseStartedAt !== null ? Date.now() - pauseStartedAt : 0;
+    set({ isPaused: false, pausedMs: pausedMs + extra, pauseStartedAt: null });
+  },
 
   // ── loadRecentWorkouts ───────────────────────────────────────────────────
   loadRecentWorkouts: async (n = 10) => {

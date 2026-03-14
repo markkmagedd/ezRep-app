@@ -51,7 +51,8 @@ export default function HomeScreen({ navigation }: Props) {
   }
 
   async function handleStartWorkout() {
-    await startWorkout({});
+    const workoutId = await startWorkout({});
+    navigation.navigate("WorkoutLogger", { workoutId });
   }
 
   // ── Active routine helpers ──────────────────────────────────────────────
@@ -70,17 +71,88 @@ export default function HomeScreen({ navigation }: Props) {
       routineDayId: todayDay.id,
       routineId: activeRoutine.id,
     });
+    navigation.navigate("WorkoutLogger", {});
   }
 
-  const totalSessions = profile?.total_sessions ?? 0;
-  const totalWorkouts = profile?.total_workouts ?? 0;
-  const totalTrainingSecs = profile?.total_training_seconds ?? 0;
-  const trainingHours = Math.floor(totalTrainingSecs / 3600);
-  const trainingMins = Math.floor((totalTrainingSecs % 3600) / 60);
-  const trainingLabel =
-    trainingHours > 0
-      ? `${trainingHours}h ${trainingMins}m`
-      : `${trainingMins}m`;
+  // ── Weekly Insights Logic ───────────────────────────────────────────────
+  const today = new Date();
+  const diffToMon = (today.getDay() + 6) % 7; // 0=Mon, 1=Tue... 6=Sun
+  const startOfThisWeek = new Date(today);
+  startOfThisWeek.setDate(today.getDate() - diffToMon);
+  startOfThisWeek.setHours(0, 0, 0, 0);
+
+  const startOfLastWeek = new Date(startOfThisWeek);
+  startOfLastWeek.setDate(startOfThisWeek.getDate() - 7);
+  
+  const endOfLastWeek = new Date(startOfThisWeek);
+  endOfLastWeek.setMilliseconds(-1);
+
+  let thisWeekWorkouts = 0;
+  let thisWeekVolume = 0;
+  let lastWeekWorkouts = 0;
+  let lastWeekVolume = 0;
+
+  for (const w of recentWorkouts) {
+    const d = new Date(w.started_at);
+    if (d >= startOfThisWeek) {
+      thisWeekWorkouts++;
+      thisWeekVolume += w.total_volume_kg;
+    } else if (d >= startOfLastWeek && d <= endOfLastWeek) {
+      lastWeekWorkouts++;
+      lastWeekVolume += w.total_volume_kg;
+    }
+  }
+
+  const volDiff = thisWeekVolume - lastWeekVolume;
+  const volPct = lastWeekVolume > 0 ? Math.round((Math.abs(volDiff) / lastWeekVolume) * 100) : 100;
+  const isVolUp = volDiff >= 0;
+  const volTrendText = lastWeekVolume === 0 && thisWeekVolume === 0 
+    ? "No volume yet" 
+    : lastWeekVolume === 0 
+      ? "↑ New volume!" 
+      : `${isVolUp ? '↑' : '↓'} ${volPct}% from last week`;
+  const volTrendColor = lastWeekVolume === 0 && thisWeekVolume === 0 ? Colors.textMuted : isVolUp ? Colors.success : Colors.danger;
+
+  const woDiff = thisWeekWorkouts - lastWeekWorkouts;
+  const isWoUp = woDiff >= 0;
+  const woTrendText = lastWeekWorkouts === 0 && thisWeekWorkouts === 0
+    ? "No workouts yet"
+    : lastWeekWorkouts === 0
+      ? "↑ Started training!"
+      : `${isWoUp ? '↑' : '↓'} ${Math.abs(woDiff)} from last week`;
+  const woTrendColor = lastWeekWorkouts === 0 && thisWeekWorkouts === 0 ? Colors.textMuted : isWoUp ? Colors.success : Colors.danger;
+
+  // ── Dashboard Helpers ───────────────────────────────────────────────────
+  
+  // 1. Grid Consistency (Calendar Aligned 4-Week Grid)
+  const diffToMonday = (today.getDay() + 6) % 7; // 0=Mon, 1=Tue... 6=Sun
+  const startOfGrid = new Date(today);
+  startOfGrid.setDate(today.getDate() - diffToMonday - 21); // Start 3 weeks ago Monday
+
+  const gridDays = Array.from({ length: 28 }, (_, i) => {
+    const d = new Date(startOfGrid);
+    d.setDate(startOfGrid.getDate() + i);
+    return d;
+  });
+
+  const workoutDayStrings = recentWorkouts.map(w => new Date(w.started_at).toDateString());
+  const todayStr = today.toDateString();
+
+  // 2. Personal Best Spotlight (Top lift from recent history)
+  // We scan the recent workouts for the heaviest set ever logged.
+  const allExercises = recentWorkouts.flatMap(w => (w as any).exercises || []);
+  const allSets = allExercises.flatMap(ex => ex.sets || []);
+  const bestSet = allSets.reduce((prev: any, curr: any) => 
+    (curr.weight_kg ?? 0) > (prev?.weight_kg ?? 0) ? curr : prev
+  , null);
+
+  let prTitle = "No PRs yet";
+  let prSub = "Start lifting to set records";
+  if (bestSet) {
+    const prExercise = allExercises.find(ex => (ex.sets || []).some((s: any) => s.id === bestSet.id));
+    prTitle = `${bestSet.weight_kg}kg ${prExercise?.exercise_name}`;
+    prSub = `Your heaviest lift in recent history`;
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
@@ -107,21 +179,29 @@ export default function HomeScreen({ navigation }: Props) {
           </TouchableOpacity>
         </View>
 
-        {/* Stats strip */}
-        <View style={styles.statsRow}>
-          <StatPill label="Time Trained" value={trainingLabel} icon="time" />
+        {/* Weekly Insights Widget */}
+        <View style={styles.insightsRow}>
+          <View style={styles.insightBox}>
+            <View style={styles.insightHeader}>
+              <Ionicons name="fitness" size={16} color={Colors.accent} />
+              <Text style={styles.insightTitle}>This Week</Text>
+            </View>
+            <Text style={styles.insightValue}>{thisWeekWorkouts}</Text>
+            <Text style={styles.insightSub}>Workouts</Text>
+            <Text style={[styles.insightTrend, { color: woTrendColor }]}>{woTrendText}</Text>
+          </View>
+
           <View style={styles.statsDivider} />
-          <StatPill
-            label="Sessions"
-            value={String(totalSessions)}
-            icon="people"
-          />
-          <View style={styles.statsDivider} />
-          <StatPill
-            label="Workouts"
-            value={String(totalWorkouts)}
-            icon="fitness"
-          />
+
+          <View style={styles.insightBox}>
+            <View style={styles.insightHeader}>
+              <Ionicons name="barbell" size={16} color={Colors.cyan} />
+              <Text style={styles.insightTitle}>Volume</Text>
+            </View>
+            <Text style={styles.insightValue}>{thisWeekVolume.toFixed(0)} <Text style={{ fontSize: FontSize.sm, color: Colors.textMuted }}>kg</Text></Text>
+            <Text style={styles.insightSub}>Total Lifted</Text>
+            <Text style={[styles.insightTrend, { color: volTrendColor }]}>{volTrendText}</Text>
+          </View>
         </View>
 
         {/* Active routine widget */}
@@ -179,28 +259,50 @@ export default function HomeScreen({ navigation }: Props) {
           </Card>
         )}
 
-        {/* Quick Actions */}
-        <Text style={styles.sectionTitle}>Quick Start</Text>
-        <View style={styles.quickRow}>
-          <QuickCard
-            icon="barbell-outline"
-            label="Solo Workout"
-            sub="Log your own session"
-            accent={Colors.accent}
-            onPress={handleStartWorkout}
-          />
-          <QuickCard
-            icon="people-outline"
-            label="Start Session"
-            sub="Train with friends"
-            accent={Colors.cyan}
-            onPress={() =>
-              (navigation as any).navigate("SessionTab", {
-                screen: "CreateSession",
-              })
-            }
-          />
+        {/* Consistency Grid (GitHub Style) */}
+        <View style={styles.gridContainer}>
+          <Text style={styles.gridLabel}>LAST 4 WEEKS MOMENTUM</Text>
+          
+          <View style={styles.gridWrapper}>
+            {/* Day Labels */}
+            <View style={styles.dayLabels}>
+              {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((day, i) => (
+                <Text key={i} style={styles.dayLabelText}>{day}</Text>
+              ))}
+            </View>
+
+            <View style={styles.grid}>
+              {gridDays.map((date, i) => {
+                const isWorkout = workoutDayStrings.includes(date.toDateString());
+                const isFuture = date > today;
+                const isToday = date.toDateString() === todayStr;
+
+                return (
+                  <View 
+                    key={i} 
+                    style={[
+                      styles.gridBox, 
+                      isWorkout && styles.gridBoxActive,
+                      isFuture && styles.gridBoxFuture,
+                      isToday && styles.gridBoxToday
+                    ]} 
+                  />
+                );
+              })}
+            </View>
+          </View>
         </View>
+
+        {/* PR Spotlight Card */}
+        <Card variant="default" padding="md" style={styles.prCard}>
+          <View style={styles.prHeader}>
+            <Ionicons name="trophy" size={16} color={Colors.warning} />
+            <Text style={styles.prLabel}>PERSONAL BEST SPOTLIGHT</Text>
+          </View>
+          <Text style={styles.prTitle}>{prTitle}</Text>
+          <Text style={styles.prSub}>{prSub}</Text>
+          <View style={styles.prGlow} />
+        </Card>
 
         {/* Recent Workouts */}
         <Text style={styles.sectionTitle}>Recent Workouts</Text>
@@ -217,67 +319,28 @@ export default function HomeScreen({ navigation }: Props) {
             </Text>
           </Card>
         ) : (
-          recentWorkouts.map((w) => (
-            <WorkoutHistoryRow key={w.id} workout={w} />
-          ))
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false}
+            snapToInterval={280 + Spacing.md}
+            decelerationRate="fast"
+            contentContainerStyle={styles.carouselContent}
+          >
+            {recentWorkouts.map((w) => (
+              <WorkoutCarouselCard key={w.id} workout={w} />
+            ))}
+          </ScrollView>
         )}
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────────
+ // Sub-components ────────────────────────────────────────────────────────────
 
-function StatPill({
-  label,
-  value,
-  icon,
-}: {
-  label: string;
-  value: string;
-  icon: keyof typeof Ionicons.glyphMap;
-}) {
-  return (
-    <View style={styles.statPill}>
-      <Ionicons name={icon} size={16} color={Colors.accent} />
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </View>
-  );
-}
-
-function QuickCard({
-  icon,
-  label,
-  sub,
-  accent,
-  onPress,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  sub: string;
-  accent: string;
-  onPress: () => void;
-}) {
-  return (
-    <TouchableOpacity
-      style={[styles.quickCard, { borderColor: accent }]}
-      onPress={onPress}
-      activeOpacity={0.8}
-    >
-      <View
-        style={[styles.quickIconCircle, { backgroundColor: accent + "22" }]}
-      >
-        <Ionicons name={icon} size={26} color={accent} />
-      </View>
-      <Text style={styles.quickLabel}>{label}</Text>
-      <Text style={styles.quickSub}>{sub}</Text>
-    </TouchableOpacity>
-  );
-}
-
-function WorkoutHistoryRow({ workout }: { workout: Workout }) {
+function WorkoutCarouselCard({ workout }: { workout: Workout }) {
   const date = new Date(workout.started_at).toLocaleDateString("en-US", {
+    weekday: "short",
     month: "short",
     day: "numeric",
   });
@@ -289,23 +352,55 @@ function WorkoutHistoryRow({ workout }: { workout: Workout }) {
       )
     : null;
 
+  // Extract top 3 exercises
+  const exercises = (workout as any).exercises || [];
+  const exerciseNames = exercises.slice(0, 3).map((ex: any) => ex.exercise_name);
+  const extCount = exercises.length - 3;
+
   return (
-    <Card style={styles.historyRow} padding="md">
-      <View style={styles.historyLeft}>
-        <View style={styles.historyDateBadge}>
-          <Text style={styles.historyDateText}>{date}</Text>
+    <Card style={styles.carouselCard} padding="md">
+      <View style={styles.carouselHeader}>
+        <View style={styles.carouselIconWrap}>
+          <Ionicons name="barbell" size={16} color={Colors.accent} />
         </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.historyName}>{workout.name}</Text>
-          {duration !== null && (
-            <Text style={styles.historyMeta}>{duration} min</Text>
-          )}
+        <Text style={styles.carouselDate}>{date}</Text>
+      </View>
+      
+      <Text style={styles.carouselName} numberOfLines={1}>{workout.name}</Text>
+      
+      <View style={styles.carouselStatsRow}>
+        {duration !== null && (
+          <View style={styles.carouselStat}>
+            <Ionicons name="time-outline" size={14} color={Colors.textMuted} />
+            <Text style={styles.carouselStatText}>{duration} min</Text>
+          </View>
+        )}
+        <View style={styles.carouselStat}>
+          <Ionicons name="stats-chart" size={14} color={Colors.accent} />
+          <Text style={[styles.carouselStatText, { color: Colors.accent, fontWeight: "bold" }]}>
+            {workout.total_volume_kg.toFixed(0)} kg
+          </Text>
         </View>
       </View>
-      <Text style={styles.historyVolume}>
-        {workout.total_volume_kg.toFixed(0)}{" "}
-        <Text style={styles.historyUnit}>kg</Text>
-      </Text>
+
+      <View style={styles.carouselLine} />
+
+      <View style={styles.carouselExercises}>
+        {exerciseNames.length > 0 ? (
+          <>
+            {exerciseNames.map((name: string, i: number) => (
+              <Text key={i} style={styles.carouselExerciseLine} numberOfLines={1}>
+                • {name}
+              </Text>
+            ))}
+            {extCount > 0 && (
+              <Text style={styles.carouselExerciseMore}>+ {extCount} more</Text>
+            )}
+          </>
+        ) : (
+          <Text style={styles.carouselExerciseLine}>No exercises logged</Text>
+        )}
+      </View>
     </Card>
   );
 }
@@ -335,7 +430,7 @@ const styles = StyleSheet.create({
   },
   avatarBtn: { padding: 4 },
 
-  statsRow: {
+  insightsRow: {
     flexDirection: "row",
     backgroundColor: Colors.bgCard,
     borderRadius: Radius.lg,
@@ -344,26 +439,42 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xl,
     paddingVertical: Spacing.md,
   },
-  statPill: {
+  insightBox: {
     flex: 1,
+    paddingHorizontal: Spacing.md,
+  },
+  insightHeader: {
+    flexDirection: "row",
     alignItems: "center",
-    gap: 2,
+    gap: 6,
+    marginBottom: Spacing.sm,
+  },
+  insightTitle: {
+    color: Colors.textMuted,
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.bold,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  insightValue: {
+    color: Colors.textPrimary,
+    fontSize: FontSize.xxl,
+    fontWeight: FontWeight.black,
+    lineHeight: 32,
+  },
+  insightSub: {
+    color: Colors.textSecondary,
+    fontSize: FontSize.sm,
+    marginBottom: Spacing.sm,
+  },
+  insightTrend: {
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.bold,
   },
   statsDivider: {
     width: 1,
     backgroundColor: Colors.border,
-    marginVertical: 4,
-  },
-  statValue: {
-    color: Colors.textPrimary,
-    fontSize: FontSize.lg,
-    fontWeight: FontWeight.bold,
-    marginTop: 4,
-  },
-  statLabel: {
-    color: Colors.textMuted,
-    fontSize: FontSize.xs,
-    textAlign: "center",
+    marginVertical: Spacing.sm,
   },
 
   sectionTitle: {
@@ -373,36 +484,109 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
   },
 
-  quickRow: {
-    flexDirection: "row",
-    gap: Spacing.sm,
-    marginBottom: Spacing.xl,
-  },
-  quickCard: {
-    flex: 1,
+  // Consistency Grid
+  gridContainer: {
     backgroundColor: Colors.bgCard,
     borderRadius: Radius.lg,
-    borderWidth: 1.5,
     padding: Spacing.md,
-    alignItems: "flex-start",
+    marginBottom: Spacing.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
-  quickIconCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: Radius.xl,
-    alignItems: "center",
-    justifyContent: "center",
+  gridLabel: {
+    color: Colors.textMuted,
+    fontSize: 10,
+    fontWeight: FontWeight.black,
+    letterSpacing: 1,
     marginBottom: Spacing.sm,
+    textAlign: "center",
   },
-  quickLabel: {
-    color: Colors.textPrimary,
-    fontSize: FontSize.md,
+  grid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    width: (14 + 6) * 7, // 7 columns * (width + gap)
+    gap: 6,
+  },
+  gridWrapper: {
+    alignItems: "center",
+  },
+  dayLabels: {
+    flexDirection: "row",
+    width: (14 + 6) * 7,
+    justifyContent: "space-between",
+    marginBottom: 6,
+    paddingHorizontal: 2,
+  },
+  dayLabelText: {
+    color: Colors.textMuted,
+    fontSize: 9,
     fontWeight: FontWeight.bold,
-    marginBottom: 2,
+    width: 14,
+    textAlign: "center",
   },
-  quickSub: {
+  gridBox: {
+    width: 14,
+    height: 14,
+    borderRadius: 3,
+    backgroundColor: Colors.bgSurface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  gridBoxActive: {
+    backgroundColor: Colors.accent,
+    borderColor: Colors.accent,
+    shadowColor: Colors.accent,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+  },
+  gridBoxFuture: {
+    opacity: 0.2,
+    borderColor: 'transparent',
+  },
+  gridBoxToday: {
+    borderColor: Colors.accent,
+    borderWidth: 1.5,
+  },
+
+  // PR Card
+  prCard: {
+    marginBottom: Spacing.lg,
+    overflow: "hidden",
+    position: "relative",
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.warning,
+  },
+  prHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 4,
+  },
+  prLabel: {
+    color: Colors.warning,
+    fontSize: 10,
+    fontWeight: FontWeight.black,
+    letterSpacing: 1,
+  },
+  prTitle: {
+    color: Colors.textPrimary,
+    fontSize: FontSize.lg,
+    fontWeight: FontWeight.black,
+  },
+  prSub: {
     color: Colors.textSecondary,
     fontSize: FontSize.xs,
+    marginTop: 2,
+  },
+  prGlow: {
+    position: "absolute",
+    right: -20,
+    bottom: -20,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: Colors.warning + "11",
   },
 
   emptyCard: {
@@ -420,47 +604,68 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
   },
 
-  historyRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: Spacing.sm,
+  carouselContent: {
+    gap: Spacing.md,
+    paddingRight: Spacing.md, // extra padding at end of scroll
   },
-  historyLeft: {
+  carouselCard: {
+    width: 280,
+    backgroundColor: Colors.bgCard,
+  },
+  carouselHeader: {
     flexDirection: "row",
     alignItems: "center",
     gap: Spacing.sm,
-    flex: 1,
+    marginBottom: Spacing.sm,
   },
-  historyDateBadge: {
+  carouselIconWrap: {
     backgroundColor: Colors.accentMuted,
+    padding: 6,
     borderRadius: Radius.sm,
-    paddingVertical: 4,
-    paddingHorizontal: 8,
   },
-  historyDateText: {
-    color: Colors.accent,
+  carouselDate: {
+    color: Colors.textMuted,
     fontSize: FontSize.xs,
     fontWeight: FontWeight.bold,
+    textTransform: "uppercase",
   },
-  historyName: {
+  carouselName: {
     color: Colors.textPrimary,
-    fontSize: FontSize.md,
-    fontWeight: FontWeight.semibold,
-  },
-  historyMeta: {
-    color: Colors.textSecondary,
-    fontSize: FontSize.xs,
-    marginTop: 2,
-  },
-  historyVolume: {
-    color: Colors.accent,
     fontSize: FontSize.lg,
     fontWeight: FontWeight.bold,
+    marginBottom: Spacing.sm,
   },
-  historyUnit: {
-    color: Colors.textMuted,
+  carouselStatsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  carouselStat: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  carouselStatText: {
+    color: Colors.textSecondary,
     fontSize: FontSize.sm,
-    fontWeight: FontWeight.regular,
+  },
+  carouselLine: {
+    height: 1,
+    backgroundColor: Colors.border,
+    marginBottom: Spacing.sm,
+  },
+  carouselExercises: {
+    gap: 2,
+  },
+  carouselExerciseLine: {
+    color: Colors.textSecondary,
+    fontSize: FontSize.xs,
+  },
+  carouselExerciseMore: {
+    color: Colors.textMuted,
+    fontSize: FontSize.xs,
+    fontStyle: "italic",
+    marginTop: 2,
   },
 });

@@ -6,7 +6,7 @@
 //  ─────────────
 //  Each session is a Firestore document at /sessions/{sessionId}.
 //  Sub-collections hold participants, exercises, and sets.
-//  Real-time sync uses Firestore onSnapshot (replaces Supabase Realtime).
+//  Real-time sync uses Firestore onSnapshot.
 //
 //  State machine: lobby → active → completed
 // ─────────────────────────────────────────────
@@ -243,7 +243,7 @@ interface SessionState {
   isLoading: boolean;
   error: string | null;
 
-  // Firestore onSnapshot unsubscribers (replaces Supabase Realtime channel)
+  // Firestore onSnapshot unsubscribers
   _unsubListeners: (() => void)[];
 
   // Actions

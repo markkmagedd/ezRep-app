@@ -16,11 +16,42 @@ export interface Profile {
 }
 
 // ─── Exercises ───────────────────────────────
+export type ExerciseCategory =
+  | "chest"
+  | "back"
+  | "shoulders"
+  | "arms"
+  | "legs"
+  | "core"
+  | "cardio"
+  | "full_body";
+
+export type ExerciseType = "STRENGTH" | "CARDIO" | "FLEXIBILITY";
+
+export interface ExerciseRecord {
+  exerciseId: string;
+  name: string;
+  imageUrl?: string;
+  videoUrl?: string;
+  equipments?: string[];
+  bodyParts: string[];
+  gender?: "male" | "female" | "unisex";
+  exerciseType?: ExerciseType;
+  targetMuscles: string[];
+  secondaryMuscles?: string[];
+  keywords?: string[];
+  overview?: string;
+  instructions: string[];
+  exerciseTips?: string[];
+  variations?: string[];
+  relatedIds?: string[];
+}
+
 // (runtime representation; library is seeded server-side)
 export interface Exercise {
   id: string;
   name: string;
-  category: string;
+  category: ExerciseCategory;
   muscle_groups: string[];
   equipment: string;
   created_by: string | null; // null = system; uuid = custom user exercise
@@ -66,6 +97,7 @@ export interface Workout {
   ended_at: string | null;
   total_volume_kg: number;
   notes: string | null;
+  exercises?: any[]; // Embedded on completion for historical display
 }
 
 export interface WorkoutExercise {
@@ -192,6 +224,7 @@ export type HomeStackParamList = {
     routineDayName?: string;
   };
   ExerciseSelector: { workoutId: string; workoutExerciseId?: string };
+  ExerciseDetail: { exerciseId: string };
 };
 
 export type WorkoutStackParamList = {
@@ -200,6 +233,7 @@ export type WorkoutStackParamList = {
   RoutineDetail: { routineId: string };
   WorkoutLogger: { routineDayId?: string; routineDayName?: string };
   ExerciseSelector: { workoutId: string };
+  ExerciseDetail: { exerciseId: string };
 };
 
 export type SessionStackParamList = {

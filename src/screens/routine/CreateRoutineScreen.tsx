@@ -7,7 +7,7 @@
 //             (search inline, set target sets/reps)
 // ─────────────────────────────────────────────
 
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   View,
   Text,
@@ -19,6 +19,8 @@ import {
   KeyboardAvoidingView,
   Platform,
   FlatList,
+  Animated,
+  Easing,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -37,8 +39,12 @@ import {
   type DraftDay,
   type DraftDayExercise,
 } from "@/store/routineStore";
-import { EXERCISE_LIBRARY } from "@/constants/exercises";
+
 import type { WorkoutStackParamList } from "@/types";
+import { MuscleGroupFilter } from "@/components/MuscleGroupFilter";
+import { ExerciseList } from "@/components/ExerciseList";
+import { ExerciseSearchBar } from "@/components/ExerciseSearchBar";
+import { useExerciseStore } from "@/store/exercise-store";
 
 type Props = NativeStackScreenProps<WorkoutStackParamList, "CreateRoutine">;
 
@@ -57,7 +63,36 @@ export default function CreateRoutineScreen({ navigation }: Props) {
   // Step 2 state — exercises per day
   const [days, setDays] = useState<DraftDay[]>([]);
   const [activeDayIdx, setActiveDayIdx] = useState(0);
-  const [exSearch, setExSearch] = useState("");
+  const [isSheetExpanded, setIsSheetExpanded] = useState(false);
+  const { setSearchQuery } = useExerciseStore();
+
+  // ── Tray animation: animate panel HEIGHT (in-flow, no absolute positioning) ─
+  const SUMMARY_H = 60;
+  const EXPANDED_H = 430;
+  const panelAnim = useRef(new Animated.Value(0)).current;
+
+  const activeExCount = days[activeDayIdx]?.exercises.length ?? 0;
+
+  useEffect(() => {
+    let targetValue = 0;
+    if (activeExCount > 0) {
+      targetValue = isSheetExpanded ? EXPANDED_H : SUMMARY_H;
+    }
+
+    Animated.timing(panelAnim, {
+      toValue: targetValue,
+      duration: 250,
+      easing: Easing.out(Easing.ease),
+      useNativeDriver: false, // height prop can't use native driver
+    }).start();
+  }, [activeExCount, isSheetExpanded]);
+
+  // Snap instantly when switching days (no animation flicker)
+  useEffect(() => {
+    const count = days[activeDayIdx]?.exercises.length ?? 0;
+    const targetValue = count > 0 ? (isSheetExpanded ? EXPANDED_H : SUMMARY_H) : 0;
+    panelAnim.setValue(targetValue);
+  }, [activeDayIdx]);
 
   // ── Step 1 helpers ──────────────────────────────────────────────────────
 
@@ -111,7 +146,6 @@ export default function CreateRoutineScreen({ navigation }: Props) {
         return { ...d, exercises: [...d.exercises, newEx] };
       }),
     );
-    setExSearch("");
   }
 
   function removeExerciseFromDay(dayIdx: number, exIdx: number) {
@@ -161,23 +195,13 @@ export default function CreateRoutineScreen({ navigation }: Props) {
     }
   }
 
-  // Filtered exercise search results
-  const searchResults = exSearch.trim()
-    ? EXERCISE_LIBRARY.filter(
-        (e) =>
-          e.name.toLowerCase().includes(exSearch.toLowerCase()) ||
-          e.muscleGroups.some((m) =>
-            m.toLowerCase().includes(exSearch.toLowerCase()),
-          ),
-      ).slice(0, 12)
-    : [];
-
   const currentDay = days[activeDayIdx];
+  const hasExercises = days.some((d) => d.exercises.length > 0);
 
   // ── Render ──────────────────────────────────────────────────────────────
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
@@ -276,161 +300,130 @@ export default function CreateRoutineScreen({ navigation }: Props) {
         {/* ══════════ STEP 2: Exercises ══════════ */}
         {step === "exercises" && (
           <View style={{ flex: 1 }}>
-            {/* Day tabs */}
+
+            {/* ── Day tabs ── */}
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
               style={styles.dayTabs}
-              contentContainerStyle={{
-                paddingHorizontal: Spacing.md,
-                gap: Spacing.sm,
-              }}
+              contentContainerStyle={styles.dayTabsContent}
             >
               {days.map((d, i) => (
                 <TouchableOpacity
                   key={i}
-                  style={[
-                    styles.dayTab,
-                    activeDayIdx === i && styles.dayTabActive,
-                  ]}
+                  style={[styles.dayTab, activeDayIdx === i && styles.dayTabActive]}
                   onPress={() => setActiveDayIdx(i)}
                 >
-                  <Text
-                    style={[
-                      styles.dayTabText,
-                      activeDayIdx === i && styles.dayTabTextActive,
-                    ]}
-                  >
+                  <Text style={[styles.dayTabText, activeDayIdx === i && styles.dayTabTextActive]}>
                     {d.name}
                   </Text>
                   {d.exercises.length > 0 && (
                     <View style={styles.dayTabBadge}>
-                      <Text style={styles.dayTabBadgeText}>
-                        {d.exercises.length}
-                      </Text>
+                      <Text style={styles.dayTabBadgeText}>{d.exercises.length}</Text>
                     </View>
                   )}
                 </TouchableOpacity>
               ))}
             </ScrollView>
 
-            <ScrollView
-              style={{ flex: 1 }}
-              contentContainerStyle={styles.scroll}
-              keyboardShouldPersistTaps="handled"
-            >
-              {/* Exercise search */}
-              <View style={styles.searchRow}>
-                <Ionicons
-                  name="search"
-                  size={18}
-                  color={Colors.textMuted}
-                  style={{ marginRight: 8 }}
-                />
-                <TextInput
-                  style={styles.searchInput}
-                  value={exSearch}
-                  onChangeText={setExSearch}
-                  placeholder="Search exercises…"
-                  placeholderTextColor={Colors.textMuted}
-                />
-              </View>
-
-              {/* Search results */}
-              {searchResults.length > 0 && (
-                <Card
-                  variant="flat"
-                  padding="none"
-                  style={styles.searchResults}
-                >
-                  {searchResults.map((ex) => (
-                    <TouchableOpacity
-                      key={ex.id}
-                      style={styles.searchResult}
-                      onPress={() => addExerciseToDay(ex.id, ex.name)}
-                    >
-                      <Text style={styles.searchResultName}>{ex.name}</Text>
-                      <Text style={styles.searchResultMuscle}>
-                        {ex.muscleGroups.join(", ")}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </Card>
-              )}
-
-              {/* Current day's exercises */}
-              <Text style={styles.sectionLabel}>
-                {currentDay?.name} — Exercises
-              </Text>
-
-              {currentDay?.exercises.length === 0 && (
-                <Text style={styles.noExText}>
-                  Search above to add exercises.
-                </Text>
-              )}
-
-              {currentDay?.exercises.map((ex, exIdx) => (
-                <Card
-                  key={exIdx}
-                  variant="default"
-                  padding="md"
-                  style={styles.exCard}
-                >
-                  <View style={styles.exCardHeader}>
-                    <Text style={styles.exCardName}>{ex.exercise_name}</Text>
-                    <TouchableOpacity
-                      onPress={() => removeExerciseFromDay(activeDayIdx, exIdx)}
-                    >
-                      <Ionicons
-                        name="close-circle"
-                        size={20}
-                        color={Colors.danger}
-                      />
-                    </TouchableOpacity>
-                  </View>
-
-                  {/* Sets × Reps targets */}
-                  <View style={styles.targetRow}>
-                    <View style={styles.targetField}>
-                      <Text style={styles.targetLabel}>Sets</Text>
-                      <TextInput
-                        style={styles.targetInput}
-                        value={String(ex.target_sets)}
-                        onChangeText={(v) =>
-                          updateExField(activeDayIdx, exIdx, "target_sets", v)
-                        }
-                        keyboardType="number-pad"
-                        maxLength={2}
-                      />
-                    </View>
-                    <Text style={styles.targetX}>×</Text>
-                    <View style={styles.targetField}>
-                      <Text style={styles.targetLabel}>Reps</Text>
-                      <TextInput
-                        style={styles.targetInput}
-                        value={String(ex.target_reps)}
-                        onChangeText={(v) =>
-                          updateExField(activeDayIdx, exIdx, "target_reps", v)
-                        }
-                        keyboardType="number-pad"
-                        maxLength={3}
-                      />
-                    </View>
-                  </View>
-                </Card>
-              ))}
-
-              {/* Save */}
-              <Button
-                label="Create Routine"
-                onPress={handleCreate}
-                variant="primary"
-                size="lg"
-                loading={isLoading}
-                style={{ marginTop: Spacing.xl }}
+            {/* ── Search bar ── */}
+            <View style={styles.searchRow}>
+              <Ionicons name="search" size={18} color={Colors.textMuted} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search exercises by name…"
+                placeholderTextColor={Colors.textMuted}
+                autoCorrect={false}
+                onChangeText={setSearchQuery}
               />
-              <View style={{ height: Spacing.xxl }} />
-            </ScrollView>
+            </View>
+
+            {/* ── Muscle group filter chips ── */}
+            <MuscleGroupFilter />
+
+            {/* ── Browse list — flex:1 fills vertical space ── */}
+            <View style={{ flex: 1 }}>
+              <ExerciseList onSelect={(ex) => addExerciseToDay(ex.exerciseId, ex.name)} />
+            </View>
+
+            {/* ── Expandable Selected Exercises Panel (Bottom Sheet) ── */}
+            <Animated.View style={[styles.selPanel, { height: panelAnim, overflow: "hidden" }]}>
+              {/* Collapsed Summary / Expansion Header */}
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={() => setIsSheetExpanded(!isSheetExpanded)}
+                style={styles.selPanelHeader}
+              >
+                <View style={styles.selPanelSummary}>
+                  <Text style={styles.selPanelTitle}>
+                    {activeExCount} exercise{activeExCount !== 1 ? "s" : ""} chosen
+                  </Text>
+                  <Text style={styles.selPanelDayName}>for {currentDay?.name}</Text>
+                </View>
+                <Ionicons
+                  name={isSheetExpanded ? "chevron-down" : "chevron-up"}
+                  size={20}
+                  color={Colors.accent}
+                />
+              </TouchableOpacity>
+
+              {/* Scrollable list content (visible when expanded) */}
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                style={{ flex: 1, paddingHorizontal: Spacing.md }}
+              >
+                <View style={{ paddingTop: Spacing.sm, paddingBottom: Spacing.md }}>
+                  {currentDay?.exercises.map((ex, exIdx) => (
+                    <Card key={exIdx} variant="default" padding="md" style={styles.exCard}>
+                      <View style={styles.exCardHeader}>
+                        <Text style={styles.exCardName}>{ex.exercise_name}</Text>
+                        <TouchableOpacity onPress={() => removeExerciseFromDay(activeDayIdx, exIdx)}>
+                          <Ionicons name="close-circle" size={20} color={Colors.danger} />
+                        </TouchableOpacity>
+                      </View>
+                      <View style={styles.targetRow}>
+                        <View style={styles.targetField}>
+                          <Text style={styles.targetLabel}>Sets</Text>
+                          <TextInput
+                            style={styles.targetInput}
+                            value={String(ex.target_sets)}
+                            onChangeText={(v) => updateExField(activeDayIdx, exIdx, "target_sets", v)}
+                            keyboardType="number-pad"
+                            maxLength={2}
+                          />
+                        </View>
+                        <Text style={styles.targetX}>×</Text>
+                        <View style={styles.targetField}>
+                          <Text style={styles.targetLabel}>Reps</Text>
+                          <TextInput
+                            style={styles.targetInput}
+                            value={String(ex.target_reps)}
+                            onChangeText={(v) => updateExField(activeDayIdx, exIdx, "target_reps", v)}
+                            keyboardType="number-pad"
+                            maxLength={3}
+                          />
+                        </View>
+                      </View>
+                    </Card>
+                  ))}
+                </View>
+              </ScrollView>
+            </Animated.View>
+
+            {/* ── Sticky Footer: Create Routine button ── */}
+            <View style={styles.footer}>
+              <TouchableOpacity
+                style={[
+                  styles.createBtn,
+                  (isLoading || !hasExercises) && { opacity: 0.5 },
+                ]}
+                onPress={handleCreate}
+                disabled={isLoading || !hasExercises}
+              >
+                <Text style={styles.createBtnText}>Create Routine</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
       </KeyboardAvoidingView>
@@ -535,9 +528,65 @@ const styles = StyleSheet.create({
   // Step 2
   dayTabs: {
     flexGrow: 0,
-    paddingVertical: Spacing.sm,
+    backgroundColor: Colors.bg,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
+  },
+  dayTabsContent: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm, // Restored to sm
+    gap: Spacing.sm, // Restored to sm
+    alignItems: "center" as const,
+  },
+
+
+
+  // Animated selection panel (in-flow, never overlaps browse list)
+  selPanel: {
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    backgroundColor: Colors.bgSurface, // Changed to bgSurface for consistency
+  },
+  selPanelHeader: {
+    height: 60,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: Spacing.md,
+    backgroundColor: Colors.bgCard,
+  },
+  selPanelSummary: {
+    flex: 1,
+  },
+  selPanelTitle: {
+    color: Colors.accent,
+    fontSize: FontSize.md,
+    fontWeight: FontWeight.bold,
+  },
+  selPanelDayName: {
+    color: Colors.textMuted,
+    fontSize: FontSize.xs,
+    marginTop: 2,
+  },
+  footer: {
+    backgroundColor: Colors.bgCard, // Match the grey color of the selection panel header
+    paddingHorizontal: Spacing.md,
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.sm, // Mild spacing to offset the tab bar
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  createBtn: {
+    backgroundColor: Colors.accent,
+    paddingVertical: 14,
+    borderRadius: Radius.md,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  createBtnText: {
+    color: Colors.bg,
+    fontWeight: FontWeight.bold,
+    fontSize: FontSize.md,
   },
   dayTab: {
     flexDirection: "row",
@@ -574,45 +623,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: Colors.bgSurface,
     borderRadius: Radius.md,
+    marginHorizontal: Spacing.md,
+    marginTop: Spacing.sm, // Restored to sm
+    marginBottom: Spacing.sm, // Restored to sm
     paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
+    height: 44,
     borderWidth: 1,
     borderColor: Colors.border,
-    marginBottom: Spacing.sm,
+    gap: Spacing.sm,
   },
   searchInput: {
     flex: 1,
     color: Colors.textPrimary,
     fontSize: FontSize.md,
-  },
-  searchResults: {
-    marginBottom: Spacing.md,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: Radius.md,
-  },
-  searchResult: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  searchResultName: {
-    color: Colors.textPrimary,
-    fontSize: FontSize.md,
-    fontWeight: FontWeight.semibold,
-  },
-  searchResultMuscle: {
-    color: Colors.textMuted,
-    fontSize: FontSize.xs,
-    marginTop: 2,
-  },
-
-  noExText: {
-    color: Colors.textMuted,
-    fontSize: FontSize.sm,
-    marginBottom: Spacing.md,
   },
 
   exCard: { marginBottom: Spacing.sm },
