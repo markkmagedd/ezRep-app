@@ -64,7 +64,7 @@ export default function RoutineDetailScreen({ navigation, route }: Props) {
     if (activeWorkout) {
       Alert.alert(
         "Workout In Progress",
-        "You already have an active workout. Finish or discard it first.",
+        "You already have an active workout. Finish or discard it first."
       );
       return;
     }
@@ -95,37 +95,15 @@ export default function RoutineDetailScreen({ navigation, route }: Props) {
   }
 
   return (
-    <SafeAreaView style={styles.safe}>
-      {/* Header */}
+    <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
+      {/* Header (Back Only) */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color={Colors.textPrimary} />
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          style={styles.backBtn}
+        >
+          <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle} numberOfLines={1}>
-          {routine.name}
-        </Text>
-        {!isActive && (
-          <TouchableOpacity
-            style={styles.activateBtn}
-            onPress={() =>
-              Alert.alert(
-                "Activate Routine",
-                `Set "${routine.name}" as your active routine?`,
-                [
-                  { text: "Cancel", style: "cancel" },
-                  { text: "Activate", onPress: () => setActiveRoutine(routineId) },
-                ],
-              )
-            }
-          >
-            <Text style={styles.activateBtnText}>Activate</Text>
-          </TouchableOpacity>
-        )}
-        {isActive && (
-          <View style={styles.activePill}>
-            <Text style={styles.activePillText}>Active</Text>
-          </View>
-        )}
       </View>
 
       <ScrollView
@@ -138,27 +116,70 @@ export default function RoutineDetailScreen({ navigation, route }: Props) {
           />
         }
       >
-        {/* Routine summary */}
-        <View style={styles.summaryRow}>
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryValue}>{days.length}</Text>
-            <Text style={styles.summaryLabel}>Days</Text>
+        {/* Hero Section */}
+        <View style={styles.heroSection}>
+          <Text style={styles.heroTitle}>{routine.name}</Text>
+          {isActive ? (
+            <View style={styles.activeBanner}>
+              <Ionicons
+                name="checkmark-circle"
+                size={16}
+                color={Colors.accent}
+              />
+              <Text style={styles.activeBannerText}>
+                Currently Active Routine
+              </Text>
+            </View>
+          ) : (
+            <Text style={styles.heroSub}>Inactive Routine</Text>
+          )}
+        </View>
+
+        {/* Improved Summary Stats */}
+        <View style={styles.statsGrid}>
+          <View style={styles.insightBox}>
+            <Text style={styles.insightValue}>{days.length}</Text>
+            <Text style={styles.insightLabel}>Days</Text>
           </View>
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryValue}>
+          <View style={styles.insightBox}>
+            <Text style={styles.insightValue}>
               {days.reduce((a, d) => a + d.exercises.length, 0)}
             </Text>
-            <Text style={styles.summaryLabel}>Exercises</Text>
+            <Text style={styles.insightLabel}>Exercises</Text>
           </View>
           {isActive && (
-            <View style={styles.summaryItem}>
-              <Text style={[styles.summaryValue, { color: Colors.accent }]}>
-                Day {currentDayIndex + 1}
+            <View
+              style={[styles.insightBox, { borderColor: Colors.accentDim }]}
+            >
+              <Text style={[styles.insightValue, { color: Colors.accent }]}>
+                #{currentDayIndex + 1}
               </Text>
-              <Text style={styles.summaryLabel}>Next up</Text>
+              <Text style={styles.insightLabel}>Next Up</Text>
             </View>
           )}
         </View>
+
+        {/* Global Activate Button */}
+        {!isActive && (
+          <Button
+            label="Set as Active Routine"
+            onPress={() =>
+              Alert.alert(
+                "Activate Routine",
+                `Set "${routine.name}" as your active routine?`,
+                [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Activate",
+                    onPress: () => setActiveRoutine(routineId),
+                  },
+                ]
+              )
+            }
+            variant="primary"
+            style={styles.globalActivateBtn}
+          />
+        )}
 
         <Text style={styles.sectionTitle}>Days</Text>
 
@@ -197,6 +218,7 @@ export default function RoutineDetailScreen({ navigation, route }: Props) {
                         styles.dayName,
                         isCurrent && { color: Colors.accent },
                       ]}
+                      numberOfLines={1}
                     >
                       {day.name}
                     </Text>
@@ -217,6 +239,7 @@ export default function RoutineDetailScreen({ navigation, route }: Props) {
                   onPress={() => handleStartDay(day)}
                   variant={isCurrent ? "primary" : "secondary"}
                   size="sm"
+                  fullWidth={false}
                 />
               </View>
 
@@ -225,11 +248,17 @@ export default function RoutineDetailScreen({ navigation, route }: Props) {
                 <View style={styles.exList}>
                   {day.exercises.map((ex, ei) => (
                     <View key={ex.id} style={styles.exRow}>
-                      <View style={styles.exOrderDot} />
-                      <Text style={styles.exName}>{ex.exercise_name}</Text>
-                      <Text style={styles.exTarget}>
-                        {ex.target_sets}×{ex.target_reps}
-                      </Text>
+                      <View style={styles.exInfo}>
+                        <Text style={styles.exName}>{ex.exercise_name}</Text>
+                        <Text style={styles.exDetail}>
+                          {ex.target_sets} sets × {ex.target_reps} reps
+                        </Text>
+                      </View>
+                      <Ionicons
+                        name="chevron-forward"
+                        size={12}
+                        color={Colors.textMuted}
+                      />
                     </View>
                   ))}
                 </View>
@@ -237,8 +266,6 @@ export default function RoutineDetailScreen({ navigation, route }: Props) {
             </Card>
           );
         })}
-
-        <View style={{ height: Spacing.xxl }} />
       </ScrollView>
     </SafeAreaView>
   );
@@ -253,99 +280,123 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
     gap: Spacing.sm,
   },
-  backBtn: { padding: 4 },
-  headerTitle: {
-    color: Colors.textPrimary,
-    fontSize: FontSize.lg,
-    fontWeight: FontWeight.bold,
-    flex: 1,
-  },
-  activateBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 5,
+  backBtn: {
+    padding: 8,
     borderRadius: Radius.pill,
+    backgroundColor: Colors.bgSurface,
     borderWidth: 1,
-    borderColor: Colors.accent,
+    borderColor: Colors.border,
   },
-  activateBtnText: {
-    color: Colors.accent,
+  heroSection: {
+    marginBottom: Spacing.xl,
+  },
+  heroTitle: {
+    color: Colors.textPrimary,
+    fontSize: FontSize.hero,
+    fontWeight: FontWeight.black,
+    lineHeight: 42,
+  },
+  heroSub: {
+    color: Colors.textMuted,
     fontSize: FontSize.sm,
-    fontWeight: FontWeight.bold,
+    marginTop: 4,
   },
-  activePill: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: Radius.pill,
+  activeBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 8,
     backgroundColor: Colors.accentMuted,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: Radius.pill,
+    alignSelf: "flex-start",
   },
-  activePillText: {
+  activeBannerText: {
     color: Colors.accent,
     fontSize: FontSize.xs,
     fontWeight: FontWeight.bold,
   },
 
-  scroll: { padding: Spacing.md },
+  scroll: { padding: Spacing.lg, paddingBottom: Spacing.xl },
 
-  summaryRow: {
+  statsGrid: {
     flexDirection: "row",
-    gap: Spacing.xl,
-    marginBottom: Spacing.lg,
+    gap: Spacing.sm,
+    marginBottom: Spacing.xl,
   },
-  summaryItem: { alignItems: "center" },
-  summaryValue: {
+  insightBox: {
+    flex: 1,
+    backgroundColor: Colors.bgCard,
+    padding: Spacing.md,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignItems: "center",
+  },
+  insightValue: {
     color: Colors.textPrimary,
-    fontSize: FontSize.xxl,
+    fontSize: FontSize.xl,
     fontWeight: FontWeight.black,
   },
-  summaryLabel: {
+  insightLabel: {
     color: Colors.textMuted,
-    fontSize: FontSize.xs,
+    fontSize: 10,
     textTransform: "uppercase",
     letterSpacing: 0.5,
+    marginTop: 2,
+  },
+
+  globalActivateBtn: {
+    marginBottom: Spacing.xl,
   },
 
   sectionTitle: {
-    color: Colors.textSecondary,
-    fontSize: FontSize.sm,
-    fontWeight: FontWeight.bold,
+    color: Colors.textMuted,
+    fontSize: 11,
+    fontWeight: FontWeight.black,
     textTransform: "uppercase",
-    letterSpacing: 0.8,
-    marginBottom: Spacing.sm,
+    letterSpacing: 1.5,
+    marginBottom: Spacing.md,
   },
 
-  dayCard: { marginBottom: Spacing.sm },
+  dayCard: {
+    marginBottom: Spacing.md,
+  },
   dayHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: Spacing.sm,
+    gap: Spacing.md,
   },
   dayNumberCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: Colors.bgSurface,
     alignItems: "center",
     justifyContent: "center",
     flexShrink: 0,
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
   dayNumberText: {
     color: Colors.textMuted,
-    fontSize: FontSize.md,
+    fontSize: FontSize.sm,
     fontWeight: FontWeight.black,
   },
   dayTitleRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: Spacing.sm,
+    paddingRight: Spacing.md,
   },
   dayName: {
     color: Colors.textPrimary,
     fontSize: FontSize.lg,
     fontWeight: FontWeight.bold,
+    flexShrink: 1,
   },
   nextBadge: {
     backgroundColor: Colors.accent,
@@ -355,45 +406,40 @@ const styles = StyleSheet.create({
   },
   nextBadgeText: {
     color: Colors.bg,
-    fontSize: FontSize.xs,
+    fontSize: 8,
     fontWeight: FontWeight.black,
     letterSpacing: 1,
   },
   dayExCount: {
-    color: Colors.textMuted,
-    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    fontSize: FontSize.xs,
     marginTop: 2,
   },
 
   exList: {
-    marginTop: Spacing.md,
-    paddingTop: Spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
-    gap: 6,
+    marginTop: Spacing.lg,
+    gap: Spacing.xs,
   },
   exRow: {
     flexDirection: "row",
     alignItems: "center",
+    backgroundColor: Colors.bgSurface,
+    padding: Spacing.sm,
+    borderRadius: Radius.md,
     gap: Spacing.sm,
   },
-  exOrderDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: Colors.accentDim,
-    flexShrink: 0,
-  },
-  exName: {
-    color: Colors.textSecondary,
-    fontSize: FontSize.sm,
+  exInfo: {
     flex: 1,
   },
-  exTarget: {
+  exName: {
+    color: Colors.textPrimary,
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.semibold,
+  },
+  exDetail: {
     color: Colors.textMuted,
     fontSize: FontSize.xs,
-    fontWeight: FontWeight.bold,
-    fontVariant: ["tabular-nums"],
+    marginTop: 1,
   },
 
   emptyCard: { alignItems: "center" },
