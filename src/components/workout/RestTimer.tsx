@@ -33,8 +33,6 @@ export function RestTimer({ onDismiss }: RestTimerProps) {
   const [remaining, setRemaining] = useState(DEFAULT_DURATION);
   const [running, setRunning] = useState(true);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const pulseAnim =
-    useRef(new Animated.Value(1)).useRef ?? useRef(new Animated.Value(1));
   const pulseRef = useRef(new Animated.Value(1));
 
   // Start or stop the countdown

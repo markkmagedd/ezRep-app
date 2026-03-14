@@ -3,16 +3,15 @@
 //  Switches between Auth and App stacks based on session state
 // ─────────────────────────────────────────────
 
-import React from "react";
-import { NavigationContainer } from "@react-navigation/native";
-import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { View, ActivityIndicator, StyleSheet } from "react-native";
-import { useAuthStore } from "@/store/authStore";
-import { Colors } from "@/constants/theme";
-import AuthNavigator from "./AuthNavigator";
-import AppNavigator from "./AppNavigator";
-import WorkoutSheet from "@/components/workout/WorkoutSheet";
-import type { RootStackParamList } from "@/types";
+import React from 'react';
+import { NavigationContainer } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { useAuthStore } from '@/store/authStore';
+import { Colors } from '@/constants/theme';
+import AuthNavigator from './AuthNavigator';
+import AppNavigator from './AppNavigator';
+import type { RootStackParamList } from '@/types';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -36,7 +35,6 @@ export default function RootNavigator() {
           <Stack.Screen name="Auth" component={AuthNavigator} />
         )}
       </Stack.Navigator>
-      {session ? <WorkoutSheet /> : null}
     </NavigationContainer>
   );
 }
@@ -45,7 +43,7 @@ const styles = StyleSheet.create({
   loader: {
     flex: 1,
     backgroundColor: Colors.bg,
-    justifyContent: "center",
-    alignItems: "center",
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });

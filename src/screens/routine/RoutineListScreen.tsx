@@ -44,7 +44,7 @@ export default function RoutineListScreen({ navigation }: Props) {
     deleteRoutine,
     isLoading,
   } = useRoutineStore();
-  const { startWorkout, activeWorkout, expandWorkout } = useWorkoutStore();
+  const { startWorkout, activeWorkout } = useWorkoutStore();
 
   const [refreshing, setRefreshing] = React.useState(false);
 
@@ -110,6 +110,10 @@ export default function RoutineListScreen({ navigation }: Props) {
         routineDayId: today.id,
         routineId: activeRoutine.id,
       });
+      navigation.navigate("WorkoutLogger", {
+        routineDayId: today.id,
+        routineDayName: today.name,
+      });
     } catch {
       Alert.alert("Error", "Could not start workout. Please try again.");
     }
@@ -124,6 +128,15 @@ export default function RoutineListScreen({ navigation }: Props) {
     : 0;
   const todayDay = activeDays[todayIndex];
 
+  // ── Sort routines: Active at top ──
+  const sortedRoutines = React.useMemo(() => {
+    return [...routines].sort((a, b) => {
+      if (a.id === activeRoutine?.id) return -1;
+      if (b.id === activeRoutine?.id) return 1;
+      return 0;
+    });
+  }, [routines, activeRoutine?.id]);
+
   return (
     <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
       {/* Header */}
@@ -137,8 +150,58 @@ export default function RoutineListScreen({ navigation }: Props) {
         </TouchableOpacity>
       </View>
 
+      {/* ── Today's Workout widget (Fixed at top) ── */}
+      {activeRoutine && (
+        <View style={{ paddingHorizontal: Spacing.md, paddingBottom: Spacing.sm, marginTop: Spacing.md }}>
+          <Card variant="accent" padding="lg" style={styles.todayCard}>
+            <View style={styles.todayHeaderRow}>
+              <View style={styles.todayHeaderRight}>
+                <View style={styles.todayBadge}>
+                  <Text style={styles.todayBadgeText}>ACTIVE ROUTINE</Text>
+                </View>
+                <Text style={styles.todayRoutineName}>{activeRoutine.name.toUpperCase()}</Text>
+              </View>
+            </View>
+
+            {todayDay ? (
+              <>
+                <View style={styles.todayDivider} />
+                <Text style={styles.todayWorkoutLabel}>TODAY'S WORKOUT</Text>
+                <Text style={styles.todayDayName}>{todayDay.name}</Text>
+                <Text style={styles.todayDayLabel}>
+                  Day {todayIndex + 1} of {activeDays.length} · {todayDay.exercises.length} exercise{todayDay.exercises.length !== 1 ? "s" : ""}
+                </Text>
+
+                <Button
+                  label={activeWorkout ? "Resume Workout" : `Start ${todayDay.name}`}
+                  onPress={
+                    activeWorkout
+                      ? () => navigation.navigate("WorkoutLogger", {})
+                      : handleStartToday
+                  }
+                  variant="primary"
+                  size="lg"
+                  style={{ marginTop: Spacing.md }}
+                />
+              </>
+            ) : (
+              <Text style={styles.todayNoDays}>
+                Add days to this routine to get started.
+              </Text>
+            )}
+          </Card>
+        </View>
+      )}
+
+      {/* ── Section Title (Fixed at top) ── */}
+      {routines.length > 0 && (
+        <Text style={[styles.sectionTitle, { paddingHorizontal: Spacing.md, marginTop: activeRoutine ? 0 : Spacing.md }]}>
+          All Routines
+        </Text>
+      )}
+
       <FlatList
-        data={routines}
+        data={sortedRoutines}
         keyExtractor={(r) => r.id}
         refreshControl={
           <RefreshControl
@@ -149,61 +212,6 @@ export default function RoutineListScreen({ navigation }: Props) {
         }
         ListHeaderComponent={
           <>
-            {/* ── Today's Workout widget ──────────────────────────── */}
-            {activeRoutine && (
-              <Card variant="accent" padding="lg" style={styles.todayCard}>
-                {/* Badge + routine name top-right */}
-                <View style={styles.todayHeaderRow}>
-                  <View style={styles.todayHeaderRight}>
-                    <View style={styles.todayBadge}>
-                      <Text style={styles.todayBadgeText}>ACTIVE ROUTINE</Text>
-                    </View>
-                    <Text style={styles.todayRoutineName}>
-                      {activeRoutine.name.toUpperCase()}
-                    </Text>
-                  </View>
-                </View>
-
-                {todayDay ? (
-                  <>
-                    {/* Divider */}
-                    <View style={styles.todayDivider} />
-
-                    {/* Today's workout */}
-                    <Text style={styles.todayWorkoutLabel}>
-                      TODAY'S WORKOUT
-                    </Text>
-                    <Text style={styles.todayDayName}>{todayDay.name}</Text>
-                    <Text style={styles.todayDayLabel}>
-                      Day {todayIndex + 1} of {activeDays.length} ·{" "}
-                      {todayDay.exercises.length} exercise
-                      {todayDay.exercises.length !== 1 ? "s" : ""}
-                    </Text>
-
-                    <Button
-                      label={
-                        activeWorkout
-                          ? "Resume Workout"
-                          : `Start ${todayDay.name}`
-                      }
-                      onPress={
-                        activeWorkout
-                          ? expandWorkout
-                          : handleStartToday
-                      }
-                      variant="primary"
-                      size="lg"
-                      style={{ marginTop: Spacing.md }}
-                    />
-                  </>
-                ) : (
-                  <Text style={styles.todayNoDays}>
-                    Add days to this routine to get started.
-                  </Text>
-                )}
-              </Card>
-            )}
-
             {routines.length === 0 && !isLoading && (
               <Card variant="flat" padding="lg" style={styles.emptyCard}>
                 <Ionicons
@@ -226,9 +234,6 @@ export default function RoutineListScreen({ navigation }: Props) {
               </Card>
             )}
 
-            {routines.length > 0 && (
-              <Text style={styles.sectionTitle}>All Routines</Text>
-            )}
           </>
         }
         renderItem={({ item: routine }) => {
@@ -276,8 +281,7 @@ export default function RoutineListScreen({ navigation }: Props) {
                       <Text style={styles.activeBadgeText}>Active</Text>
                       <Text style={styles.activeDayText}>
                         · Day{" "}
-                        {(routine.current_day_index %
-                          Math.max(days.length, 1)) +
+                        {(routine.current_day_index % Math.max(days.length, 1)) +
                           1}{" "}
                         next
                       </Text>
@@ -333,7 +337,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
+    paddingVertical: Spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
@@ -344,7 +348,7 @@ const styles = StyleSheet.create({
   },
   addBtn: { padding: 4 },
 
-  list: { padding: Spacing.md, paddingBottom: Spacing.xxl },
+  list: { paddingBottom: Spacing.xxl },
 
   todayCard: { marginBottom: Spacing.lg },
   todayHeaderRow: {
@@ -426,6 +430,7 @@ const styles = StyleSheet.create({
 
   routineCard: {
     marginBottom: Spacing.sm,
+    marginHorizontal: Spacing.md,
   },
   routineCardInner: {
     flexDirection: "row",

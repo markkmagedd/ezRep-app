@@ -1,15 +1,16 @@
 // ─────────────────────────────────────────────
 //  ezRep — Workout Logger Screen
-//  Full-featured solo workout tracker:
-//  add exercises → log sets (weight × reps) → finish
+//  Session-style solo workout tracker:
+//  one exercise at a time, big inputs, set pills
 // ─────────────────────────────────────────────
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
+  TextInput,
   TouchableOpacity,
   Alert,
   Modal,
@@ -18,19 +19,20 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
+import { useFocusEffect } from "@react-navigation/native";
 import {
   Colors,
   FontSize,
   FontWeight,
   Spacing,
   Radius,
+  Shadow,
 } from "@/constants/theme";
-import { Button } from "@/components/common/Button";
 import { Card } from "@/components/common/Card";
-import { SetRow } from "@/components/workout/SetRow";
 import { RestTimer } from "@/components/workout/RestTimer";
-import { useWorkoutStore, type DraftExercise } from "@/store/workoutStore";
+import { useWorkoutStore } from "@/store/workoutStore";
 import type { HomeStackParamList } from "@/types";
 
 type Props = NativeStackScreenProps<HomeStackParamList, "WorkoutLogger">;
@@ -40,6 +42,8 @@ export default function WorkoutLoggerScreen({ navigation, route }: Props) {
     activeWorkout,
     exercises,
     startedAt,
+    isPaused,
+    pausedMs,
     addSet,
     updateSet,
     removeSet,
@@ -47,47 +51,145 @@ export default function WorkoutLoggerScreen({ navigation, route }: Props) {
     removeExercise,
     finishWorkout,
     discardWorkout,
+    minimizeWorkout,
+    resumeWorkout,
+    pauseWorkout,
+    unpauseWorkout,
     isLoading,
   } = useWorkoutStore();
 
-  const [elapsed, setElapsed] = useState(0);
-  const [showRestTimer, setShowRestTimer] = useState(false);
-  const [lastCompletedExId, setLastCompletedExId] = useState<string | null>(
-    null,
+  // Track whether finish/discard was intentionally triggered
+  const intentionalExitRef = useRef(false);
+
+  // Auto-minimize on blur, resume on focus
+  useFocusEffect(
+    useCallback(() => {
+      resumeWorkout();
+      intentionalExitRef.current = false;
+      return () => {
+        if (!intentionalExitRef.current) {
+          minimizeWorkout();
+        }
+      };
+    }, [])
   );
 
-  // Elapsed timer
+  const [currentExIndex, setCurrentExIndex] = useState(0);
+  const [weight, setWeight] = useState("");
+  const [reps, setReps] = useState("");
+  const [elapsed, setElapsed] = useState(0);
+  const [showRestTimer, setShowRestTimer] = useState(false);
+
+  function handlePauseResume() {
+    if (isPaused) {
+      unpauseWorkout();
+    } else {
+      pauseWorkout();
+    }
+  }
+
+  // Elapsed timer — stops while paused
   useEffect(() => {
-    if (!startedAt) return;
+    if (!startedAt || isPaused) return;
     const interval = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - startedAt.getTime()) / 1000));
+      setElapsed(
+        Math.floor((Date.now() - startedAt.getTime() - pausedMs) / 1000)
+      );
     }, 1000);
     return () => clearInterval(interval);
-  }, [startedAt]);
+  }, [startedAt, isPaused, pausedMs]);
+
+  // Clamp currentExIndex when exercises change
+  useEffect(() => {
+    if (currentExIndex >= exercises.length && exercises.length > 0) {
+      setCurrentExIndex(exercises.length - 1);
+    }
+  }, [exercises.length]);
 
   const formatElapsed = (secs: number) => {
-    const h = Math.floor(secs / 3600);
-    const m = Math.floor((secs % 3600) / 60);
+    const m = Math.floor(secs / 60);
     const s = secs % 60;
-    if (h > 0)
-      return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+    return `${m}:${s.toString().padStart(2, "0")}`;
   };
 
-  // Total completed sets volume
+  const currentExercise = exercises[currentExIndex] ?? null;
+  const completedSets = currentExercise
+    ? currentExercise.sets.filter((s) => s.completed)
+    : [];
+  const totalCompletedAll = exercises.reduce(
+    (a, e) => a + e.sets.filter((s) => s.completed).length,
+    0,
+  );
   const totalVolume = exercises.reduce(
-    (acc, ex) =>
-      acc +
-      ex.sets
+    (a, e) =>
+      a +
+      e.sets
         .filter((s) => s.completed)
-        .reduce((a, s) => a + (s.reps ?? 0) * (s.weight_kg ?? 0), 0),
+        .reduce((acc, s) => acc + (s.reps ?? 0) * (s.weight_kg ?? 0), 0),
     0,
   );
 
-  function handleSetComplete(exId: string, setId: string) {
-    completeSet(exId, setId);
-    setLastCompletedExId(exId);
+  // ── Handlers ───────────────────────────────────────────────
+
+  function handleLogSet() {
+    if (!currentExercise) return;
+    const w = parseFloat(weight);
+    const r = parseInt(reps, 10);
+    if (!w || !r || w <= 0 || r <= 0) {
+      Alert.alert("Invalid Input", "Enter weight and reps greater than 0.");
+      return;
+    }
+
+    // Find next incomplete set, or add a new one
+    let targetSet = currentExercise.sets.find((s) => !s.completed);
+    if (!targetSet) {
+      addSet(currentExercise.id);
+      const updated = useWorkoutStore.getState().exercises;
+      const ex = updated.find((e) => e.id === currentExercise.id);
+      targetSet = ex?.sets.find((s) => !s.completed);
+    }
+    if (!targetSet) return;
+
+    updateSet(currentExercise.id, targetSet.id, { weight_kg: w, reps: r });
+    completeSet(currentExercise.id, targetSet.id);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+    setWeight("");
+    setReps("");
     setShowRestTimer(true);
+  }
+
+  function handleRemoveLastSet() {
+    if (!currentExercise || completedSets.length === 0) return;
+    const last = completedSets[completedSets.length - 1];
+    Alert.alert(
+      "Undo Last Set?",
+      `Remove ${last.weight_kg}kg × ${last.reps}?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: () => removeSet(currentExercise.id, last.id),
+        },
+      ],
+    );
+  }
+
+  function handleRemoveExercise() {
+    if (!currentExercise) return;
+    Alert.alert(
+      "Remove Exercise?",
+      `Remove ${currentExercise.exercise_name} and all its sets?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: () => removeExercise(currentExercise.id),
+        },
+      ],
+    );
   }
 
   function confirmDiscard() {
@@ -97,6 +199,7 @@ export default function WorkoutLoggerScreen({ navigation, route }: Props) {
         text: "Discard",
         style: "destructive",
         onPress: () => {
+          intentionalExitRef.current = true;
           discardWorkout();
           navigation.goBack();
         },
@@ -105,10 +208,7 @@ export default function WorkoutLoggerScreen({ navigation, route }: Props) {
   }
 
   async function handleFinish() {
-    const completedSets = exercises.flatMap((e) =>
-      e.sets.filter((s) => s.completed),
-    );
-    if (completedSets.length === 0) {
+    if (totalCompletedAll === 0) {
       Alert.alert(
         "No Sets Logged",
         "Complete at least one set before finishing.",
@@ -116,6 +216,7 @@ export default function WorkoutLoggerScreen({ navigation, route }: Props) {
       return;
     }
     try {
+      intentionalExitRef.current = true;
       await finishWorkout();
       navigation.goBack();
     } catch {
@@ -123,79 +224,272 @@ export default function WorkoutLoggerScreen({ navigation, route }: Props) {
     }
   }
 
+  // ── Render ─────────────────────────────────────────────────
+
   return (
     <SafeAreaView style={styles.safe}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
-        keyboardVerticalOffset={80}
+        keyboardVerticalOffset={60}
       >
-        {/* ── Top Bar ────────────────────────────────────── */}
+        {/* ── Top Bar ────────────────────────────── */}
         <View style={styles.topBar}>
-          <TouchableOpacity
-            onPress={() => navigation.goBack()}
-            onLongPress={confirmDiscard}
-            style={styles.topBarBtn}
-          >
-            <Ionicons name="chevron-down" size={24} color={Colors.textMuted} />
-          </TouchableOpacity>
-
-          <View style={styles.topBarCenter}>
-            <Text style={styles.workoutName}>
-              {activeWorkout?.name ?? "Workout"}
-            </Text>
+          <View style={styles.topLeft}>
+            <TouchableOpacity
+              onPress={() => navigation.goBack()}
+              style={styles.minimizeBtn}
+            >
+              <Ionicons
+                name="chevron-down"
+                size={22}
+                color={Colors.textSecondary}
+              />
+            </TouchableOpacity>
             <Text style={styles.timer}>{formatElapsed(elapsed)}</Text>
           </View>
 
-          <Button
-            label="Finish"
-            onPress={handleFinish}
-            loading={isLoading}
-            size="sm"
-            style={styles.finishBtn}
-            fullWidth={false}
-          />
+          {/* Exercise progress dots */}
+          <View style={styles.progressDots}>
+            {exercises.map((_, i) => (
+              <TouchableOpacity key={i} onPress={() => setCurrentExIndex(i)}>
+                <View
+                  style={[
+                    styles.dot,
+                    i === currentExIndex && styles.dotActive,
+                    i < currentExIndex && styles.dotDone,
+                  ]}
+                />
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <View style={styles.topRight}>
+            <TouchableOpacity
+              style={styles.pauseBtn}
+              onPress={handlePauseResume}
+            >
+              <Ionicons name={isPaused ? "play" : "pause"} size={16} color={Colors.accent} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.discardBtn}
+              onPress={confirmDiscard}
+            >
+              <Ionicons name="close" size={18} color={Colors.danger} />
+            </TouchableOpacity>
+          </View>
         </View>
 
-        {/* ── Volume strip ────────────────────────────────── */}
-        <View style={styles.volumeStrip}>
-          <Ionicons name="barbell" size={14} color={Colors.accent} />
-          <Text style={styles.volumeText}>
-            {totalVolume.toFixed(0)} kg total volume
-          </Text>
-        </View>
-
-        {/* ── Exercise list ───────────────────────────────── */}
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={styles.scroll}
           keyboardShouldPersistTaps="handled"
         >
+          {/* ── No exercises state ────────────────── */}
           {exercises.length === 0 && (
-            <Card style={styles.emptyCard}>
+            <View style={styles.emptyState}>
               <Ionicons
                 name="add-circle-outline"
-                size={40}
+                size={48}
                 color={Colors.textMuted}
               />
-              <Text style={styles.emptyText}>
-                Add your first exercise below.
+              <Text style={styles.emptyTitle}>No Exercises Yet</Text>
+              <Text style={styles.emptySubtitle}>
+                Add your first exercise to get started.
               </Text>
-            </Card>
+            </View>
           )}
 
-          {exercises.map((ex) => (
-            <ExerciseBlock
-              key={ex.id}
-              exercise={ex}
-              onAddSet={() => addSet(ex.id)}
-              onUpdateSet={(setId, updates) => updateSet(ex.id, setId, updates)}
-              onCompleteSet={(setId) => handleSetComplete(ex.id, setId)}
-              onRemoveSet={(setId) => removeSet(ex.id, setId)}
-              onRemoveExercise={() => removeExercise(ex.id)}
-            />
-          ))}
+          {/* ── Current Exercise Card ─────────────── */}
+          {currentExercise && (
+            <>
+              <Card variant="accent" style={styles.exCard} padding="lg">
+                <View style={styles.exCardTop}>
+                  <Text style={styles.exIndexLabel}>
+                    Exercise {currentExIndex + 1} of {exercises.length}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={handleRemoveExercise}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons
+                      name="trash-outline"
+                      size={16}
+                      color={Colors.textMuted}
+                    />
+                  </TouchableOpacity>
+                </View>
+                <Text style={styles.exName}>
+                  {currentExercise.exercise_name}
+                </Text>
+                <Text style={styles.exTarget}>
+                  {currentExercise.sets.length} sets ·{" "}
+                  {completedSets.length} completed
+                </Text>
+              </Card>
 
-          {/* Add Exercise button */}
+              {/* ── Completed Set Pills ────────────── */}
+              {completedSets.length > 0 && (
+                <>
+                  <Text style={styles.sectionLabel}>Logged Sets</Text>
+                  <View style={styles.setPills}>
+                    {completedSets.map((s) => (
+                      <View key={s.id} style={styles.setPill}>
+                        <Text style={styles.setPillText}>
+                          {s.weight_kg}×{s.reps}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                  <TouchableOpacity
+                    style={styles.undoBtn}
+                    onPress={handleRemoveLastSet}
+                  >
+                    <Ionicons
+                      name="arrow-undo-outline"
+                      size={14}
+                      color={Colors.textMuted}
+                    />
+                    <Text style={styles.undoBtnText}>Undo Last Set</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+
+              {/* ── Set Logger ─────────────────────── */}
+              <Text style={styles.sectionLabel}>Log Set</Text>
+              <Card style={styles.loggerCard} padding="lg">
+                <Text style={styles.loggerHint}>
+                  Set {completedSets.length + 1}
+                  {completedSets.length > 0 && (
+                    <Text style={styles.loggerPrev}>
+                      {" "}
+                      (last: {completedSets[completedSets.length - 1].weight_kg}
+                      kg × {completedSets[completedSets.length - 1].reps})
+                    </Text>
+                  )}
+                </Text>
+
+                <View style={styles.loggerInputs}>
+                  {/* Weight */}
+                  <View style={styles.loggerInputGroup}>
+                    <Text style={styles.loggerInputLabel}>Weight (kg)</Text>
+                    <TextInput
+                      style={styles.loggerInput}
+                      keyboardType="decimal-pad"
+                      placeholder={
+                        completedSets.length > 0
+                          ? completedSets[
+                              completedSets.length - 1
+                            ].weight_kg?.toString() ?? "0"
+                          : "0"
+                      }
+                      placeholderTextColor={Colors.textMuted}
+                      value={weight}
+                      onChangeText={setWeight}
+                      returnKeyType="next"
+                      selectionColor={Colors.accent}
+                    />
+                  </View>
+
+                  <Text style={styles.loggerSeparator}>×</Text>
+
+                  {/* Reps */}
+                  <View style={styles.loggerInputGroup}>
+                    <Text style={styles.loggerInputLabel}>Reps</Text>
+                    <TextInput
+                      style={styles.loggerInput}
+                      keyboardType="number-pad"
+                      placeholder={
+                        completedSets.length > 0
+                          ? completedSets[
+                              completedSets.length - 1
+                            ].reps?.toString() ?? "0"
+                          : "0"
+                      }
+                      placeholderTextColor={Colors.textMuted}
+                      value={reps}
+                      onChangeText={setReps}
+                      returnKeyType="done"
+                      onSubmitEditing={handleLogSet}
+                      selectionColor={Colors.accent}
+                    />
+                  </View>
+
+                  {/* Log button */}
+                  <TouchableOpacity
+                    style={[
+                      styles.logBtn,
+                      (!weight || !reps) && { opacity: 0.4 },
+                    ]}
+                    onPress={handleLogSet}
+                    disabled={!weight || !reps}
+                  >
+                    <Ionicons name="checkmark" size={28} color={Colors.bg} />
+                  </TouchableOpacity>
+                </View>
+              </Card>
+
+              {/* ── Exercise navigation ────────────── */}
+              <View style={styles.exNav}>
+                <TouchableOpacity
+                  style={[
+                    styles.exNavBtn,
+                    currentExIndex === 0 && styles.exNavBtnDisabled,
+                  ]}
+                  disabled={currentExIndex === 0}
+                  onPress={() => setCurrentExIndex((i) => i - 1)}
+                >
+                  <Ionicons
+                    name="chevron-back"
+                    size={18}
+                    color={
+                      currentExIndex === 0
+                        ? Colors.textMuted
+                        : Colors.textPrimary
+                    }
+                  />
+                  <Text
+                    style={[
+                      styles.exNavBtnText,
+                      currentExIndex === 0 && styles.exNavBtnTextDisabled,
+                    ]}
+                  >
+                    Previous
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.exNavBtn,
+                    currentExIndex >= exercises.length - 1 &&
+                      styles.exNavBtnDisabled,
+                  ]}
+                  disabled={currentExIndex >= exercises.length - 1}
+                  onPress={() => setCurrentExIndex((i) => i + 1)}
+                >
+                  <Text
+                    style={[
+                      styles.exNavBtnText,
+                      currentExIndex >= exercises.length - 1 &&
+                        styles.exNavBtnTextDisabled,
+                    ]}
+                  >
+                    Next
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={18}
+                    color={
+                      currentExIndex >= exercises.length - 1
+                        ? Colors.textMuted
+                        : Colors.textPrimary
+                    }
+                  />
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
+
+          {/* ── Add Exercise ──────────────────────── */}
           <TouchableOpacity
             style={styles.addExBtn}
             onPress={() =>
@@ -208,18 +502,45 @@ export default function WorkoutLoggerScreen({ navigation, route }: Props) {
             <Text style={styles.addExText}>Add Exercise</Text>
           </TouchableOpacity>
 
-          {/* Discard link */}
+          {/* ── Rest timer trigger ────────────────── */}
           <TouchableOpacity
-            style={styles.discardLink}
-            onPress={confirmDiscard}
+            style={styles.restTimerTrigger}
+            onPress={() => setShowRestTimer(true)}
           >
-            <Text style={styles.discardLinkText}>Discard Workout</Text>
+            <Ionicons
+              name="timer-outline"
+              size={18}
+              color={Colors.textMuted}
+            />
+            <Text style={styles.restTimerText}>Rest Timer</Text>
           </TouchableOpacity>
+
+          {/* ── Volume summary ────────────────────── */}
+          {totalCompletedAll > 0 && (
+            <View style={styles.volumeSummary}>
+              <Ionicons name="barbell" size={14} color={Colors.accent} />
+              <Text style={styles.volumeText}>
+                {totalVolume.toFixed(0)} kg total · {totalCompletedAll} sets
+              </Text>
+            </View>
+          )}
+
+          {/* ── Finish button ─────────────────────── */}
+          {totalCompletedAll > 0 && (
+            <TouchableOpacity
+              style={styles.finishBtn}
+              onPress={handleFinish}
+              disabled={isLoading}
+            >
+              <Ionicons name="checkmark-circle" size={20} color={Colors.bg} />
+              <Text style={styles.finishBtnText}>Finish Workout</Text>
+            </TouchableOpacity>
+          )}
 
           <View style={{ height: Spacing.xxl }} />
         </ScrollView>
 
-        {/* ── Rest Timer Modal ────────────────────────────── */}
+        {/* ── Rest Timer Modal ────────────────────── */}
         <Modal
           visible={showRestTimer}
           animationType="slide"
@@ -245,190 +566,245 @@ export default function WorkoutLoggerScreen({ navigation, route }: Props) {
   );
 }
 
-// ── ExerciseBlock ─────────────────────────────────────────────────────────────
-
-interface ExerciseBlockProps {
-  exercise: DraftExercise;
-  onAddSet: () => void;
-  onUpdateSet: (setId: string, updates: any) => void;
-  onCompleteSet: (setId: string) => void;
-  onRemoveSet: (setId: string) => void;
-  onRemoveExercise: () => void;
-}
-
-function ExerciseBlock({
-  exercise,
-  onAddSet,
-  onUpdateSet,
-  onCompleteSet,
-  onRemoveSet,
-  onRemoveExercise,
-}: ExerciseBlockProps) {
-  const completedCount = exercise.sets.filter((s) => s.completed).length;
-  const volume = exercise.sets
-    .filter((s) => s.completed)
-    .reduce((a, s) => a + (s.reps ?? 0) * (s.weight_kg ?? 0), 0);
-
-  return (
-    <Card style={styles.exCard} padding="md">
-      {/* Exercise header */}
-      <View style={styles.exHeader}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.exName}>{exercise.exercise_name}</Text>
-          <Text style={styles.exMeta}>
-            {completedCount}/{exercise.sets.length} sets · {volume.toFixed(0)}{" "}
-            kg
-          </Text>
-        </View>
-        <TouchableOpacity onPress={onRemoveExercise} style={styles.removeBtnEx}>
-          <Ionicons name="trash-outline" size={18} color={Colors.textMuted} />
-        </TouchableOpacity>
-      </View>
-
-      {/* Set header labels */}
-      <View style={styles.setHeader}>
-        <Text style={[styles.setHeaderLabel, { width: 28 }]}>Set</Text>
-        <Text style={[styles.setHeaderLabel, { width: 50 }]}>Prev</Text>
-        <Text style={[styles.setHeaderLabel, { flex: 1 }]}>kg</Text>
-        <Text style={styles.setHeaderLabel}>×</Text>
-        <Text style={[styles.setHeaderLabel, { flex: 1 }]}>Reps</Text>
-        <Text style={[styles.setHeaderLabel, { width: 36 }]}></Text>
-        <Text style={[styles.setHeaderLabel, { width: 18 }]}></Text>
-      </View>
-
-      {/* Sets */}
-      {exercise.sets.map((set, idx) => {
-        const prev = exercise.sets[idx - 1];
-        return (
-          <SetRow
-            key={set.id}
-            set={set}
-            onUpdate={(u) => onUpdateSet(set.id, u)}
-            onComplete={() => onCompleteSet(set.id)}
-            onDelete={() => onRemoveSet(set.id)}
-            prevReps={prev?.reps ?? null}
-            prevWeight={prev?.weight_kg ?? null}
-          />
-        );
-      })}
-
-      {/* Add Set */}
-      <TouchableOpacity style={styles.addSetBtn} onPress={onAddSet}>
-        <Ionicons name="add" size={16} color={Colors.textSecondary} />
-        <Text style={styles.addSetText}>Add Set</Text>
-      </TouchableOpacity>
-    </Card>
-  );
-}
-
-// ── Styles ────────────────────────────────────────────────────────────────────
-
+// ── Styles ─────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.bg },
 
   topBar: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
-  topBarBtn: { padding: Spacing.xs },
-  topBarCenter: { flex: 1, alignItems: "center" },
-  workoutName: {
-    color: Colors.textPrimary,
-    fontSize: FontSize.md,
-    fontWeight: FontWeight.bold,
-  },
+  topLeft: { flexDirection: "row", alignItems: "center", gap: Spacing.sm },
+  minimizeBtn: { padding: 2 },
   timer: {
-    color: Colors.accent,
-    fontSize: FontSize.sm,
-    fontWeight: FontWeight.semibold,
-    fontVariant: ["tabular-nums"],
-  },
-  finishBtn: {
-    backgroundColor: Colors.accent,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: Radius.md,
-  },
-
-  volumeStrip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    justifyContent: "center",
-    paddingVertical: Spacing.xs,
-    backgroundColor: Colors.accentMuted,
-  },
-  volumeText: {
-    color: Colors.accent,
-    fontSize: FontSize.xs,
-    fontWeight: FontWeight.semibold,
-  },
-
-  scrollContent: { padding: Spacing.md },
-
-  emptyCard: {
-    alignItems: "center",
-    paddingVertical: Spacing.xl,
-    gap: Spacing.sm,
-    marginBottom: Spacing.md,
-  },
-  emptyText: {
     color: Colors.textMuted,
     fontSize: FontSize.sm,
+    fontVariant: ["tabular-nums"],
+  },
+  progressDots: {
+    flexDirection: "row",
+    gap: 6,
+    alignItems: "center",
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: Colors.border,
+  },
+  dotActive: {
+    backgroundColor: Colors.accent,
+    width: 20,
+    borderRadius: 4,
+  },
+  dotDone: { backgroundColor: Colors.accentDim },
+  menuBtn: { padding: 4 },
+  topRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  pauseBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.accent + "22",
+    borderWidth: 1,
+    borderColor: Colors.accent + "66",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: Colors.accent,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  discardBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.danger + "22",
+    borderWidth: 1,
+    borderColor: Colors.danger + "66",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: Colors.danger,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 6,
   },
 
-  exCard: { marginBottom: Spacing.md },
-  exHeader: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    marginBottom: Spacing.sm,
+  scroll: { padding: Spacing.md },
+
+  emptyState: {
+    alignItems: "center",
+    paddingVertical: Spacing.xxl,
+    gap: Spacing.sm,
   },
-  exName: {
+  emptyTitle: {
     color: Colors.textPrimary,
     fontSize: FontSize.lg,
     fontWeight: FontWeight.bold,
   },
-  exMeta: {
+  emptySubtitle: {
+    color: Colors.textMuted,
+    fontSize: FontSize.sm,
+  },
+
+  exCard: { marginBottom: Spacing.lg },
+  exCardTop: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: Spacing.sm,
+  },
+  exIndexLabel: {
+    color: Colors.accentDim,
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.bold,
+    textTransform: "uppercase",
+    letterSpacing: 1,
+  },
+  exName: {
+    color: Colors.textPrimary,
+    fontSize: FontSize.xxl,
+    fontWeight: FontWeight.black,
+    letterSpacing: -0.5,
+    marginBottom: 4,
+  },
+  exTarget: {
+    color: Colors.textSecondary,
+    fontSize: FontSize.md,
+  },
+
+  sectionLabel: {
+    color: Colors.textSecondary,
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.bold,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    marginBottom: Spacing.sm,
+    marginTop: Spacing.sm,
+  },
+
+  setPills: {
+    flexDirection: "row",
+    gap: 6,
+    flexWrap: "wrap",
+    marginBottom: Spacing.xs,
+  },
+  setPill: {
+    borderRadius: Radius.sm,
+    borderWidth: 1,
+    borderColor: Colors.accent,
+    backgroundColor: Colors.accent + "22",
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    minWidth: 60,
+    alignItems: "center",
+  },
+  setPillText: {
+    color: Colors.accent,
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.bold,
+    fontVariant: ["tabular-nums"],
+  },
+
+  undoBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    alignSelf: "flex-start",
+    paddingVertical: 4,
+    marginBottom: Spacing.sm,
+  },
+  undoBtnText: {
     color: Colors.textMuted,
     fontSize: FontSize.xs,
-    marginTop: 2,
   },
-  removeBtnEx: { padding: 4 },
 
-  setHeader: {
+  loggerCard: { marginBottom: Spacing.sm },
+  loggerHint: {
+    color: Colors.textSecondary,
+    fontSize: FontSize.md,
+    fontWeight: FontWeight.semibold,
+    marginBottom: Spacing.md,
+  },
+  loggerPrev: {
+    color: Colors.textMuted,
+    fontWeight: FontWeight.regular,
+    fontSize: FontSize.sm,
+  },
+  loggerInputs: {
     flexDirection: "row",
     alignItems: "center",
     gap: Spacing.sm,
-    marginBottom: 4,
-    paddingHorizontal: Spacing.xs,
   },
-  setHeaderLabel: {
+  loggerInputGroup: { flex: 1, alignItems: "center", gap: 4 },
+  loggerInputLabel: {
     color: Colors.textMuted,
     fontSize: FontSize.xs,
-    fontWeight: FontWeight.semibold,
     textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  loggerInput: {
+    backgroundColor: Colors.bgSurface,
+    borderRadius: Radius.md,
+    borderWidth: 2,
+    borderColor: Colors.accentDim,
+    color: Colors.textPrimary,
+    fontSize: 28,
+    fontWeight: FontWeight.black,
     textAlign: "center",
+    paddingVertical: Spacing.sm,
+    width: "100%",
+    height: 64,
+  },
+  loggerSeparator: {
+    color: Colors.textMuted,
+    fontSize: 28,
+    fontWeight: FontWeight.black,
+    paddingHorizontal: 4,
+    marginTop: 20,
+  },
+  logBtn: {
+    width: 64,
+    height: 64,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.accent,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 20,
+    ...Shadow.accent,
   },
 
-  addSetBtn: {
+  exNav: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: Spacing.md,
+    marginBottom: Spacing.lg,
+  },
+  exNavBtn: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    paddingVertical: Spacing.sm,
-    justifyContent: "center",
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
-    marginTop: Spacing.xs,
+    gap: 4,
+    paddingVertical: Spacing.xs,
+    paddingHorizontal: Spacing.sm,
   },
-  addSetText: {
-    color: Colors.textSecondary,
+  exNavBtnDisabled: { opacity: 0.3 },
+  exNavBtnText: {
+    color: Colors.textPrimary,
     fontSize: FontSize.sm,
     fontWeight: FontWeight.semibold,
   },
+  exNavBtnTextDisabled: { color: Colors.textMuted },
 
   addExBtn: {
     flexDirection: "row",
@@ -441,22 +817,55 @@ const styles = StyleSheet.create({
     borderColor: Colors.accent,
     borderStyle: "dashed",
     paddingVertical: Spacing.md,
-    marginTop: Spacing.sm,
+    marginBottom: Spacing.md,
   },
   addExText: {
     color: Colors.accent,
     fontSize: FontSize.md,
     fontWeight: FontWeight.bold,
   },
-  discardLink: {
+
+  restTimerTrigger: {
+    flexDirection: "row",
     alignItems: "center",
-    marginTop: Spacing.lg,
+    justifyContent: "center",
+    gap: 6,
     paddingVertical: Spacing.sm,
   },
-  discardLinkText: {
-    color: Colors.danger,
+  restTimerText: {
+    color: Colors.textMuted,
     fontSize: FontSize.sm,
-    fontWeight: FontWeight.bold,
+  },
+
+  volumeSummary: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: Spacing.sm,
+    marginTop: Spacing.sm,
+  },
+  volumeText: {
+    color: Colors.accent,
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.semibold,
+  },
+
+  finishBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: Spacing.sm,
+    backgroundColor: Colors.accent,
+    borderRadius: Radius.lg,
+    paddingVertical: Spacing.md,
+    marginTop: Spacing.md,
+    ...Shadow.accent,
+  },
+  finishBtnText: {
+    color: Colors.bg,
+    fontSize: FontSize.md,
+    fontWeight: FontWeight.black,
   },
 
   modalOverlay: {

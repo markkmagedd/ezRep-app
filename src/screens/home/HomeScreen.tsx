@@ -51,7 +51,8 @@ export default function HomeScreen({ navigation }: Props) {
   }
 
   async function handleStartWorkout() {
-    await startWorkout({});
+    const workoutId = await startWorkout({});
+    navigation.navigate("WorkoutLogger", { workoutId });
   }
 
   // ── Active routine helpers ──────────────────────────────────────────────
@@ -70,6 +71,7 @@ export default function HomeScreen({ navigation }: Props) {
       routineDayId: todayDay.id,
       routineId: activeRoutine.id,
     });
+    navigation.navigate("WorkoutLogger", {});
   }
 
   const totalSessions = profile?.total_sessions ?? 0;
@@ -77,10 +79,35 @@ export default function HomeScreen({ navigation }: Props) {
   const totalTrainingSecs = profile?.total_training_seconds ?? 0;
   const trainingHours = Math.floor(totalTrainingSecs / 3600);
   const trainingMins = Math.floor((totalTrainingSecs % 3600) / 60);
-  const trainingLabel =
-    trainingHours > 0
-      ? `${trainingHours}h ${trainingMins}m`
-      : `${trainingMins}m`;
+  const trainingLabel = trainingHours > 0 ? `${trainingHours}h ${trainingMins}m` : `${trainingMins}m`;
+
+  // ── Dashboard Helpers ───────────────────────────────────────────────────
+  
+  // 1. Weekly Consistency (Last 7 Days)
+  const today = new Date();
+  const weekDays = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date();
+    d.setDate(today.getDate() - (6 - i));
+    return d;
+  });
+  const workoutDayStrings = recentWorkouts.map(w => new Date(w.started_at).toDateString());
+  const weeklyConsistency = weekDays.map(d => workoutDayStrings.includes(d.toDateString()));
+
+  // 2. Personal Best Spotlight (Top lift from recent history)
+  // We scan the recent workouts for the heaviest set ever logged.
+  const allExercises = recentWorkouts.flatMap(w => (w as any).exercises || []);
+  const allSets = allExercises.flatMap(ex => ex.sets || []);
+  const bestSet = allSets.reduce((prev: any, curr: any) => 
+    (curr.weight_kg ?? 0) > (prev?.weight_kg ?? 0) ? curr : prev
+  , null);
+
+  let prTitle = "No PRs yet";
+  let prSub = "Start lifting to set records";
+  if (bestSet) {
+    const prExercise = allExercises.find(ex => (ex.sets || []).some((s: any) => s.id === bestSet.id));
+    prTitle = `${bestSet.weight_kg}kg ${prExercise?.exercise_name}`;
+    prSub = `Your heaviest lift in recent history`;
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
@@ -109,7 +136,11 @@ export default function HomeScreen({ navigation }: Props) {
 
         {/* Stats strip */}
         <View style={styles.statsRow}>
-          <StatPill label="Time Trained" value={trainingLabel} icon="time" />
+          <StatPill
+            label="Time Trained"
+            value={trainingLabel}
+            icon="time"
+          />
           <View style={styles.statsDivider} />
           <StatPill
             label="Sessions"
@@ -179,27 +210,59 @@ export default function HomeScreen({ navigation }: Props) {
           </Card>
         )}
 
-        {/* Quick Actions */}
-        <Text style={styles.sectionTitle}>Quick Start</Text>
-        <View style={styles.quickRow}>
-          <QuickCard
-            icon="barbell-outline"
-            label="Solo Workout"
-            sub="Log your own session"
-            accent={Colors.accent}
+        {/* Weekly Consistency Bar */}
+        <View style={styles.consistencyRow}>
+          {weekDays.map((date, i) => (
+            <View key={i} style={styles.dayCol}>
+              <View 
+                style={[
+                  styles.dayOrb, 
+                  weeklyConsistency[i] && styles.dayOrbActive
+                ]} 
+              />
+              <Text style={styles.dayInit}>
+                {date.toLocaleDateString("en-US", { weekday: "narrow" })}
+              </Text>
+            </View>
+          ))}
+        </View>
+
+        {/* PR Spotlight Card */}
+        <Card variant="default" padding="md" style={styles.prCard}>
+          <View style={styles.prHeader}>
+            <Ionicons name="trophy" size={16} color={Colors.warning} />
+            <Text style={styles.prLabel}>PERSONAL BEST SPOTLIGHT</Text>
+          </View>
+          <Text style={styles.prTitle}>{prTitle}</Text>
+          <Text style={styles.prSub}>{prSub}</Text>
+          <View style={styles.prGlow} />
+        </Card>
+
+        {/* Compact Quick Actions */}
+        <View style={styles.compactActions}>
+          <TouchableOpacity 
+            style={[styles.compactBtn, { backgroundColor: Colors.bgCard }]}
             onPress={handleStartWorkout}
-          />
-          <QuickCard
-            icon="people-outline"
-            label="Start Session"
-            sub="Train with friends"
-            accent={Colors.cyan}
-            onPress={() =>
-              (navigation as any).navigate("SessionTab", {
-                screen: "CreateSession",
-              })
-            }
-          />
+          >
+            <Ionicons name="barbell" size={20} color={Colors.accent} />
+            <Text style={styles.compactBtnText}>Solo</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={[styles.compactBtn, { backgroundColor: Colors.bgCard }]}
+            onPress={() => navigation.navigate("SessionTab" as any)}
+          >
+            <Ionicons name="people" size={20} color={Colors.cyan} />
+            <Text style={styles.compactBtnText}>Group</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={[styles.compactBtn, { backgroundColor: Colors.bgCard }]}
+            onPress={() => navigation.navigate("WorkoutTab" as any)}
+          >
+            <Ionicons name="list" size={20} color={Colors.textSecondary} />
+            <Text style={styles.compactBtnText}>Routines</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Recent Workouts */}
@@ -246,35 +309,6 @@ function StatPill({
   );
 }
 
-function QuickCard({
-  icon,
-  label,
-  sub,
-  accent,
-  onPress,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  sub: string;
-  accent: string;
-  onPress: () => void;
-}) {
-  return (
-    <TouchableOpacity
-      style={[styles.quickCard, { borderColor: accent }]}
-      onPress={onPress}
-      activeOpacity={0.8}
-    >
-      <View
-        style={[styles.quickIconCircle, { backgroundColor: accent + "22" }]}
-      >
-        <Ionicons name={icon} size={26} color={accent} />
-      </View>
-      <Text style={styles.quickLabel}>{label}</Text>
-      <Text style={styles.quickSub}>{sub}</Text>
-    </TouchableOpacity>
-  );
-}
 
 function WorkoutHistoryRow({ workout }: { workout: Workout }) {
   const date = new Date(workout.started_at).toLocaleDateString("en-US", {
@@ -373,36 +407,101 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
   },
 
-  quickRow: {
+  // Consistency Bar
+  consistencyRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    backgroundColor: Colors.bgCard,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  dayCol: { alignItems: "center", gap: 6 },
+  dayOrb: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: Colors.bgSurface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  dayOrbActive: {
+    backgroundColor: Colors.accent,
+    borderColor: Colors.accent,
+    shadowColor: Colors.accent,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 4,
+  },
+  dayInit: {
+    color: Colors.textMuted,
+    fontSize: 10,
+    fontWeight: FontWeight.bold,
+  },
+
+  // PR Card
+  prCard: {
+    marginBottom: Spacing.lg,
+    overflow: "hidden",
+    position: "relative",
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.warning,
+  },
+  prHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 4,
+  },
+  prLabel: {
+    color: Colors.warning,
+    fontSize: 10,
+    fontWeight: FontWeight.black,
+    letterSpacing: 1,
+  },
+  prTitle: {
+    color: Colors.textPrimary,
+    fontSize: FontSize.lg,
+    fontWeight: FontWeight.black,
+  },
+  prSub: {
+    color: Colors.textSecondary,
+    fontSize: FontSize.xs,
+    marginTop: 2,
+  },
+  prGlow: {
+    position: "absolute",
+    right: -20,
+    bottom: -20,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: Colors.warning + "11",
+  },
+
+  // Compact Actions
+  compactActions: {
     flexDirection: "row",
     gap: Spacing.sm,
     marginBottom: Spacing.xl,
   },
-  quickCard: {
+  compactBtn: {
     flex: 1,
-    backgroundColor: Colors.bgCard,
-    borderRadius: Radius.lg,
-    borderWidth: 1.5,
-    padding: Spacing.md,
-    alignItems: "flex-start",
-  },
-  quickIconCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: Radius.xl,
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: Spacing.sm,
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
-  quickLabel: {
+  compactBtnText: {
     color: Colors.textPrimary,
-    fontSize: FontSize.md,
+    fontSize: FontSize.sm,
     fontWeight: FontWeight.bold,
-    marginBottom: 2,
-  },
-  quickSub: {
-    color: Colors.textSecondary,
-    fontSize: FontSize.xs,
   },
 
   emptyCard: {
