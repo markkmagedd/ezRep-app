@@ -92,6 +92,10 @@ interface WorkoutState {
 
   loadRecentWorkouts: (limit?: number) => Promise<void>;
   loadWorkout: (workoutId: string) => Promise<void>;
+
+  // Data Aggregators for Yearly Consistency
+  getYearlyActivityOptions: () => number[];
+  getGridForYear: (year: number) => Record<string, number>;
 }
 
 let _setCounter = 0;
@@ -483,5 +487,28 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
     } else {
       set({ isLoading: false });
     }
+  },
+
+  getYearlyActivityOptions: () => {
+    const { recentWorkouts } = get();
+    const years = recentWorkouts.map((w) =>
+      new Date(w.started_at).getFullYear(),
+    );
+    return Array.from(new Set(years)).sort((a, b) => b - a);
+  },
+
+  getGridForYear: (year) => {
+    const { recentWorkouts } = get();
+    const grid: Record<string, number> = {};
+
+    recentWorkouts.forEach((w) => {
+      const d = new Date(w.started_at);
+      if (d.getFullYear() === year) {
+        const key = d.toISOString().split("T")[0]; // YYYY-MM-DD
+        grid[key] = (grid[key] || 0) + 1;
+      }
+    });
+
+    return grid;
   },
 }));
