@@ -35,6 +35,7 @@ import ActiveSessionScreen from "@/screens/session/ActiveSessionScreen";
 import PostSessionStatsScreen from "@/screens/session/PostSessionStatsScreen";
 import SessionHistoryScreen from "@/screens/session/SessionHistoryScreen";
 import ProfileScreen from "@/screens/profile/ProfileScreen";
+import YearlyConsistencyScreen from "@/screens/home/YearlyConsistencyScreen";
 
 // ── Stack navigators ────────────────────────────────────────────────────────
 
@@ -61,6 +62,11 @@ function HomeStackNavigator() {
         name="ExerciseDetail"
         component={ExerciseDetailScreen}
         options={{ title: "Exercise Info" }}
+      />
+      <HomeStack.Screen
+        name="YearlyConsistency"
+        component={YearlyConsistencyScreen}
+        options={{ title: "Activity History", headerShown: false }}
       />
     </HomeStack.Navigator>
   );

@@ -225,6 +225,7 @@ export type HomeStackParamList = {
   };
   ExerciseSelector: { workoutId: string; workoutExerciseId?: string };
   ExerciseDetail: { exerciseId: string };
+  YearlyConsistency: undefined;
 };
 
 export type WorkoutStackParamList = {

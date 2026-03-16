@@ -183,7 +183,7 @@ export default function HomeScreen({ navigation }: Props) {
         <View style={styles.insightsRow}>
           <View style={styles.insightBox}>
             <View style={styles.insightHeader}>
-              <Ionicons name="fitness" size={16} color={Colors.accent} />
+              <Ionicons name="heart" size={16} color={Colors.danger} />
               <Text style={styles.insightTitle}>This Week</Text>
             </View>
             <Text style={styles.insightValue}>{thisWeekWorkouts}</Text>
@@ -260,38 +260,47 @@ export default function HomeScreen({ navigation }: Props) {
         )}
 
         {/* Consistency Grid (GitHub Style) */}
-        <View style={styles.gridContainer}>
-          <Text style={styles.gridLabel}>LAST 4 WEEKS MOMENTUM</Text>
-          
-          <View style={styles.gridWrapper}>
-            {/* Day Labels */}
-            <View style={styles.dayLabels}>
-              {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((day, i) => (
-                <Text key={i} style={styles.dayLabelText}>{day}</Text>
-              ))}
-            </View>
+        <TouchableOpacity
+          onPress={() => navigation.navigate("YearlyConsistency")}
+          activeOpacity={0.7}
+        >
+          <View style={styles.gridContainer}>
+            <Text style={styles.gridLabel}>LAST 4 WEEKS MOMENTUM</Text>
 
-            <View style={styles.grid}>
-              {gridDays.map((date, i) => {
-                const isWorkout = workoutDayStrings.includes(date.toDateString());
-                const isFuture = date > today;
-                const isToday = date.toDateString() === todayStr;
+            <View style={styles.gridWrapper}>
+              {/* Day Labels */}
+              <View style={styles.dayLabels}>
+                {["M", "T", "W", "T", "F", "S", "S"].map((day, i) => (
+                  <Text key={i} style={styles.dayLabelText}>
+                    {day}
+                  </Text>
+                ))}
+              </View>
 
-                return (
-                  <View 
-                    key={i} 
-                    style={[
-                      styles.gridBox, 
-                      isWorkout && styles.gridBoxActive,
-                      isFuture && styles.gridBoxFuture,
-                      isToday && styles.gridBoxToday
-                    ]} 
-                  />
-                );
-              })}
+              <View style={styles.grid}>
+                {gridDays.map((date, i) => {
+                  const isWorkout = workoutDayStrings.includes(
+                    date.toDateString(),
+                  );
+                  const isFuture = date > today;
+                  const isToday = date.toDateString() === todayStr;
+
+                  return (
+                    <View
+                      key={i}
+                      style={[
+                        styles.gridBox,
+                        isWorkout && styles.gridBoxActive,
+                        isFuture && styles.gridBoxFuture,
+                        isToday && styles.gridBoxToday,
+                      ]}
+                    />
+                  );
+                })}
+              </View>
             </View>
           </View>
-        </View>
+        </TouchableOpacity>
 
         {/* PR Spotlight Card */}
         <Card variant="default" padding="md" style={styles.prCard}>
@@ -436,7 +445,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.lg,
     borderWidth: 1,
     borderColor: Colors.border,
-    marginBottom: Spacing.xl,
+    marginBottom: Spacing.md,
     paddingVertical: Spacing.md,
   },
   insightBox: {
