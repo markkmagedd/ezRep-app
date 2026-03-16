@@ -70,6 +70,12 @@ interface WorkoutState {
   // Actions
   startWorkout: (options?: StartWorkoutOptions) => Promise<string>; // returns workoutId
   addExercise: (exerciseId: string, exerciseName: string) => string;
+  addExerciseWithDetails: (
+    exerciseId: string,
+    exerciseName: string,
+    reps: number,
+    weight: number,
+  ) => string;
   addExercises: (items: { id: string; name: string }[]) => void;
   removeExercise: (workoutExerciseId: string) => void;
   reorderExercises: (from: number, to: number) => void;
@@ -221,6 +227,32 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
           set_index: 1,
           reps: null,
           weight_kg: null,
+          is_warmup: false,
+          completed: false,
+        },
+      ],
+    };
+
+    set({ exercises: [...exercises, newExercise] });
+    return id;
+  },
+
+  // ── addExerciseWithDetails ───────────────────────────────────────────────
+  addExerciseWithDetails: (exerciseId, exerciseName, reps, weight) => {
+    const { exercises } = get();
+    const id = uid();
+
+    const newExercise: DraftExercise = {
+      id,
+      exercise_id: exerciseId,
+      exercise_name: exerciseName,
+      order_index: exercises.length,
+      sets: [
+        {
+          id: uid(),
+          set_index: 1,
+          reps: reps,
+          weight_kg: weight > 0 ? weight : null,
           is_warmup: false,
           completed: false,
         },

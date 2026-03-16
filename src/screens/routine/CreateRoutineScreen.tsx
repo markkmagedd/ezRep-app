@@ -40,11 +40,12 @@ import {
   type DraftDayExercise,
 } from "@/store/routineStore";
 
-import type { WorkoutStackParamList } from "@/types";
+import type { WorkoutStackParamList, PendingWorkout } from "@/types";
 import { MuscleGroupFilter } from "@/components/MuscleGroupFilter";
 import { ExerciseList } from "@/components/ExerciseList";
 import { ExerciseSearchBar } from "@/components/ExerciseSearchBar";
 import { useExerciseStore } from "@/store/exercise-store";
+import { SetsRepsConfigModal } from "@/components/routine/SetsRepsConfigModal";
 
 type Props = NativeStackScreenProps<WorkoutStackParamList, "CreateRoutine">;
 
@@ -64,6 +65,7 @@ export default function CreateRoutineScreen({ navigation }: Props) {
   const [days, setDays] = useState<DraftDay[]>([]);
   const [activeDayIdx, setActiveDayIdx] = useState(0);
   const [isSheetExpanded, setIsSheetExpanded] = useState(false);
+  const [pendingWorkout, setPendingWorkout] = useState<PendingWorkout | null>(null);
   const { setSearchQuery } = useExerciseStore();
 
   // ── Tray animation: animate panel HEIGHT (in-flow, no absolute positioning) ─
@@ -130,22 +132,54 @@ export default function CreateRoutineScreen({ navigation }: Props) {
   // ── Step 2 helpers ──────────────────────────────────────────────────────
 
   function addExerciseToDay(exerciseId: string, exerciseName: string) {
+    const day = days[activeDayIdx];
+    if (!day) return;
+
+    const exists = day.exercises.some((e) => e.exercise_id === exerciseId);
+    if (exists) {
+      // Toggle off if already added
+      setDays((prev) =>
+        prev.map((d, i) => {
+          if (i !== activeDayIdx) return d;
+          return {
+            ...d,
+            exercises: d.exercises.filter((e) => e.exercise_id !== exerciseId),
+          };
+        }),
+      );
+      return;
+    }
+
+    setPendingWorkout({
+      exerciseId,
+      exerciseName,
+      reps: "10",
+      sets: "3",
+    });
+  }
+
+  function handleConfigConfirm(sets: number, reps: number) {
+    if (!pendingWorkout) return;
+
     setDays((prev) =>
       prev.map((d, i) => {
         if (i !== activeDayIdx) return d;
-        const exists = d.exercises.some((e) => e.exercise_id === exerciseId);
-        if (exists) return d;
         const newEx: DraftDayExercise = {
-          exercise_id: exerciseId,
-          exercise_name: exerciseName,
+          exercise_id: pendingWorkout.exerciseId,
+          exercise_name: pendingWorkout.exerciseName,
           order_index: d.exercises.length,
-          target_sets: 3,
-          target_reps: 10,
+          target_sets: sets,
+          target_reps: reps,
           target_weight_kg: null,
         };
         return { ...d, exercises: [...d.exercises, newEx] };
       }),
     );
+    setPendingWorkout(null);
+  }
+
+  function handleConfigCancel() {
+    setPendingWorkout(null);
   }
 
   function removeExerciseFromDay(dayIdx: number, exIdx: number) {
@@ -427,6 +461,15 @@ export default function CreateRoutineScreen({ navigation }: Props) {
           </View>
         )}
       </KeyboardAvoidingView>
+
+      {pendingWorkout && (
+        <SetsRepsConfigModal
+          isVisible={!!pendingWorkout}
+          exerciseName={pendingWorkout.exerciseName}
+          onConfirm={handleConfigConfirm}
+          onCancel={handleConfigCancel}
+        />
+      )}
     </SafeAreaView>
   );
 }

@@ -57,6 +57,13 @@ export interface Exercise {
   created_by: string | null; // null = system; uuid = custom user exercise
 }
 
+export interface PendingWorkout {
+  exerciseId: string;
+  exerciseName: string;
+  reps: string;
+  sets: string;
+}
+
 // ─── Routines ────────────────────────────────
 export interface Routine {
   id: string;
