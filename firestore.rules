@@ -2,6 +2,14 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // ─── Collection Groups ───────────────────────────────────────────────────
+    // Allow collection group queries on 'participants' across all sessions
+    match /{path=**}/participants/{uid} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update, delete: if request.auth.uid == uid;
+    }
+
     // ─── Users ──────────────────────────────────────────────────────────────
     match /users/{userId} {
       // Any signed-in user can read profiles (e.g. to look up a username)

@@ -7,12 +7,17 @@ export interface Profile {
   id: string; // UUID — matches auth.users.id
   username: string;
   display_name: string;
-  avatar_url: string | null;
+  avatar_url: string | null; // profile photo URL
   total_volume_kg: number; // lifetime volume lifted
   total_sessions: number;
   total_workouts: number;
   total_training_seconds: number;
   created_at: string;
+  lifetime_pr?: {
+    weight_kg: number;
+    exercise_name: string;
+    achieved_at: string; // ISO 8601
+  } | null;
 }
 
 // ─── Exercises ───────────────────────────────
@@ -205,6 +210,13 @@ export interface SessionStats {
   hardest_trainer_id: string | null;
 }
 
+// ─── Exercise PR ──────────────────────────────
+export interface ExercisePR {
+  exercise_name: string;
+  weight_kg: number;
+  achieved_at: string; // ISO 8601
+}
+
 // ─── Navigation param lists ───────────────────
 export type RootStackParamList = {
   Auth: undefined;
@@ -233,6 +245,12 @@ export type HomeStackParamList = {
   ExerciseSelector: { workoutId: string; workoutExerciseId?: string };
   ExerciseDetail: { exerciseId: string };
   YearlyConsistency: undefined;
+  PRSpotlight: undefined;
+};
+
+export type ProfileStackParamList = {
+  Profile: undefined;
+  PRSpotlight: undefined;
 };
 
 export type WorkoutStackParamList = {
