@@ -17,6 +17,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import {
   Colors,
   FontSize,
@@ -27,18 +29,42 @@ import {
 } from "@/constants/theme";
 import { Card } from "@/components/common/Card";
 import { Button } from "@/components/common/Button";
+import { Avatar } from "@/components/common/Avatar";
+import { PhotoEditor } from "@/components/profile/PhotoEditor";
 import { useAuthStore } from "@/store/authStore";
+import type { ProfileStackParamList } from "@/types";
 
 export default function ProfileScreen() {
-  const { profile, loading, updateProfile, signOut } = useAuthStore();
+  const navigation = useNavigation<NativeStackNavigationProp<ProfileStackParamList>>();
+  const {
+    profile,
+    loading,
+    photoUploadPending,
+    updateProfile,
+    updateProfilePhoto,
+    removeProfilePhoto,
+    signOut,
+  } = useAuthStore();
 
   const [editing, setEditing] = useState(false);
   const [displayName, setDisplayName] = useState(profile?.display_name ?? "");
   const [saving, setSaving] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   useEffect(() => {
     setDisplayName(profile?.display_name ?? "");
   }, [profile?.display_name]);
+
+  useEffect(() => {
+    if (!toastMessage) return;
+
+    const timeout = setTimeout(() => setToastMessage(null), 3200);
+    return () => clearTimeout(timeout);
+  }, [toastMessage]);
+
+  function showToast(message: string) {
+    setToastMessage(message);
+  }
 
   async function handleSave() {
     if (!displayName.trim()) return;
@@ -47,9 +73,27 @@ export default function ProfileScreen() {
       await updateProfile({ display_name: displayName.trim() });
       setEditing(false);
     } catch {
-      Alert.alert("Error", "Failed to update profile. Please try again.");
+      showToast("Failed to update your display name. Please try again.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleProfilePhotoSelected(localUri: string) {
+    try {
+      await updateProfilePhoto(localUri);
+      showToast("Profile photo updated.");
+    } catch {
+      showToast("Couldn't upload your profile photo. Check your connection and try again.");
+    }
+  }
+
+  async function handleProfilePhotoRemoved() {
+    try {
+      await removeProfilePhoto();
+      showToast("Profile photo removed.");
+    } catch {
+      showToast("Couldn't remove your profile photo. Please try again.");
     }
   }
 
@@ -103,9 +147,28 @@ export default function ProfileScreen() {
       <View style={styles.content}>
         {/* ── Avatar + Identity ──────────────────── */}
         <View style={styles.avatarSection}>
-          <View style={styles.avatarCircle}>
-            <Text style={styles.avatarLetter}>{avatarLetter}</Text>
-          </View>
+          <PhotoEditor
+            currentPhotoUrl={profile.avatar_url}
+            uploading={photoUploadPending}
+            onPhotoSelected={handleProfilePhotoSelected}
+            onPhotoRemoved={handleProfilePhotoRemoved}
+            onError={showToast}
+          >
+            <View style={styles.avatarEditor}>
+              <Avatar
+                uri={profile.avatar_url}
+                fallbackLabel={avatarLetter}
+                size={96}
+                loading={photoUploadPending}
+                editable
+              />
+              <Text style={styles.avatarHint}>
+                {photoUploadPending
+                  ? "Uploading profile photo..."
+                  : "Tap to change profile photo"}
+              </Text>
+            </View>
+          </PhotoEditor>
 
           {editing ? (
             <View style={styles.editRow}>
@@ -177,6 +240,24 @@ export default function ProfileScreen() {
           />
         </View>
 
+        <TouchableOpacity
+          onPress={() => navigation.navigate("PRSpotlight")}
+          activeOpacity={0.7}
+        >
+          <Card variant="accent" padding="md" style={styles.prSpotlightLink}>
+            <View style={styles.prSpotlightContent}>
+              <View style={styles.prSpotlightIcon}>
+                <Ionicons name="trophy" size={20} color={Colors.warning} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.prSpotlightTitle}>Heaviest Lifts</Text>
+                <Text style={styles.prSpotlightSub}>View all your personal records</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
+            </View>
+          </Card>
+        </TouchableOpacity>
+
         {/* ── Account Details ────────────────────── */}
         <Text style={styles.sectionTitle}>Account</Text>
         <Card variant="default" padding="none" style={styles.menuCard}>
@@ -204,6 +285,12 @@ export default function ProfileScreen() {
 
         <Text style={styles.versionTag}>ezRep • v1.0.0</Text>
       </View>
+      {toastMessage ? (
+        <View style={styles.toast}>
+          <Ionicons name="information-circle" size={18} color={Colors.accent} />
+          <Text style={styles.toastText}>{toastMessage}</Text>
+        </View>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -286,23 +373,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: Spacing.md,
   },
-  avatarCircle: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    backgroundColor: Colors.accentMuted,
-    borderWidth: 2,
-    borderColor: Colors.accent,
+  avatarEditor: {
     alignItems: "center",
-    justifyContent: "center",
     marginBottom: Spacing.md,
-    ...Shadow.accent,
   },
-  avatarLetter: {
-    color: Colors.accent,
-    fontSize: 40,
-    fontWeight: FontWeight.black,
-    lineHeight: 46,
+  avatarHint: {
+    marginTop: Spacing.sm,
+    color: Colors.textSecondary,
+    fontSize: FontSize.sm,
   },
   displayNameRow: {
     flexDirection: "row",
@@ -402,5 +480,55 @@ const styles = StyleSheet.create({
     fontSize: FontSize.xs,
     textAlign: "center",
     marginTop: Spacing.xl,
+  },
+  toast: {
+    position: "absolute",
+    left: Spacing.md,
+    right: Spacing.md,
+    bottom: Spacing.xl,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.accentMuted,
+    backgroundColor: Colors.bgSurface,
+    ...Shadow.md,
+  },
+  toastText: {
+    flex: 1,
+    color: Colors.textPrimary,
+    fontSize: FontSize.sm,
+  },
+
+  // PR Spotlight Link
+  prSpotlightLink: {
+    marginTop: Spacing.md,
+    borderColor: Colors.warning + "33",
+    borderWidth: 1,
+  },
+  prSpotlightContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.md,
+  },
+  prSpotlightIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.warning + "11",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  prSpotlightTitle: {
+    color: Colors.textPrimary,
+    fontSize: FontSize.md,
+    fontWeight: FontWeight.bold,
+  },
+  prSpotlightSub: {
+    color: Colors.textMuted,
+    fontSize: FontSize.xs,
   },
 });

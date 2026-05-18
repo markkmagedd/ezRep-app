@@ -27,6 +27,7 @@ import {
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import type { Profile } from "@/types";
+import { deleteProfilePhoto, uploadProfilePhoto } from "@/services/storageService";
 
 interface AuthState {
   // Firebase user (null when signed out)
@@ -34,6 +35,7 @@ interface AuthState {
   profile: Profile | null;
   loading: boolean;
   error: string | null;
+  photoUploadPending: boolean;
 
   // Actions
   initialize: () => void;
@@ -41,6 +43,8 @@ interface AuthState {
   signUp: (email: string, password: string, username: string) => Promise<void>;
   signOut: () => Promise<void>;
   updateProfile: (updates: Partial<Profile>) => Promise<void>;
+  updateProfilePhoto: (localUri: string) => Promise<void>;
+  removeProfilePhoto: () => Promise<void>;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -64,6 +68,7 @@ async function fetchProfile(uid: string): Promise<Profile | null> {
     total_training_seconds: d.total_training_seconds ?? 0,
     created_at:
       d.created_at?.toDate?.()?.toISOString() ?? new Date().toISOString(),
+    lifetime_pr: d.lifetime_pr ?? null,
   };
 }
 
@@ -74,6 +79,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   profile: null,
   loading: true,
   error: null,
+  photoUploadPending: false,
 
   // ── initialize ──────────────────────────────────────────────────────────
   // Call once on app mount. Sets up the Firebase auth listener which fires
@@ -180,8 +186,82 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       firestoreUpdates.avatar_url = updates.avatar_url;
     if (updates.username !== undefined)
       firestoreUpdates.username = updates.username;
+    if (updates.lifetime_pr !== undefined)
+      firestoreUpdates.lifetime_pr = updates.lifetime_pr;
 
     await updateDoc(userDocRef(user.uid), firestoreUpdates);
-    set({ profile: { ...profile, ...updates } });
+    set({ profile: { ...profile, ...updates }, error: null });
+  },
+
+  updateProfilePhoto: async (localUri) => {
+    const user = auth.currentUser;
+    const { profile } = get();
+
+    if (!user || !profile) {
+      throw new Error("You must be signed in to update your profile photo.");
+    }
+
+    const previousAvatarUrl = profile.avatar_url ?? null;
+
+    set({
+      profile: { ...profile, avatar_url: localUri },
+      photoUploadPending: true,
+      error: null,
+    });
+
+    try {
+      const downloadUrl = await uploadProfilePhoto(user.uid, localUri);
+      await updateDoc(userDocRef(user.uid), { avatar_url: downloadUrl });
+
+      set((state) => ({
+        profile: state.profile
+          ? { ...state.profile, avatar_url: downloadUrl }
+          : state.profile,
+        photoUploadPending: false,
+        error: null,
+      }));
+    } catch (error: any) {
+      set((state) => ({
+        profile: state.profile
+          ? { ...state.profile, avatar_url: previousAvatarUrl }
+          : state.profile,
+        photoUploadPending: false,
+        error: error?.message ?? "Failed to upload profile photo.",
+      }));
+      throw error;
+    }
+  },
+
+  removeProfilePhoto: async () => {
+    const user = auth.currentUser;
+    const { profile } = get();
+
+    if (!user || !profile) {
+      throw new Error("You must be signed in to remove your profile photo.");
+    }
+
+    const previousAvatarUrl = profile.avatar_url ?? null;
+
+    set({
+      profile: { ...profile, avatar_url: null },
+      photoUploadPending: true,
+      error: null,
+    });
+
+    try {
+      await updateDoc(userDocRef(user.uid), { avatar_url: null });
+      await deleteProfilePhoto(user.uid);
+
+      set({ photoUploadPending: false, error: null });
+    } catch (error: any) {
+      set((state) => ({
+        profile: state.profile
+          ? { ...state.profile, avatar_url: previousAvatarUrl }
+          : state.profile,
+        photoUploadPending: false,
+        error: error?.message ?? "Failed to remove profile photo.",
+      }));
+      throw error;
+    }
   },
 }));

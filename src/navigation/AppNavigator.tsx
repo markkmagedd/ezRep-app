@@ -17,6 +17,7 @@ import type {
   HomeStackParamList,
   SessionStackParamList,
   WorkoutStackParamList,
+  ProfileStackParamList,
 } from "@/types";
 
 // Screens
@@ -35,6 +36,7 @@ import ActiveSessionScreen from "@/screens/session/ActiveSessionScreen";
 import PostSessionStatsScreen from "@/screens/session/PostSessionStatsScreen";
 import SessionHistoryScreen from "@/screens/session/SessionHistoryScreen";
 import ProfileScreen from "@/screens/profile/ProfileScreen";
+import PRSpotlightScreen from "@/screens/profile/PRSpotlightScreen";
 import YearlyConsistencyScreen from "@/screens/home/YearlyConsistencyScreen";
 
 // ── Stack navigators ────────────────────────────────────────────────────────
@@ -67,6 +69,11 @@ function HomeStackNavigator() {
         name="YearlyConsistency"
         component={YearlyConsistencyScreen}
         options={{ title: "Activity History", headerShown: false }}
+      />
+      <HomeStack.Screen
+        name="PRSpotlight"
+        component={PRSpotlightScreen}
+        options={{ title: "Heaviest Lifts" }}
       />
     </HomeStack.Navigator>
   );
@@ -150,6 +157,24 @@ function SessionStackNavigator() {
         options={{ title: "All Sessions" }}
       />
     </SessionStack.Navigator>
+  );
+}
+
+const ProfileStack = createNativeStackNavigator<ProfileStackParamList>();
+function ProfileStackNavigator() {
+  return (
+    <ProfileStack.Navigator screenOptions={stackOptions}>
+      <ProfileStack.Screen
+        name="Profile"
+        component={ProfileScreen}
+        options={{ title: "Profile" }}
+      />
+      <ProfileStack.Screen
+        name="PRSpotlight"
+        component={PRSpotlightScreen}
+        options={{ title: "Heaviest Lifts" }}
+      />
+    </ProfileStack.Navigator>
   );
 }
 
@@ -308,7 +333,7 @@ export default function AppNavigator() {
       />
       <Tab.Screen
         name="ProfileTab"
-        component={ProfileScreen}
+        component={ProfileStackNavigator}
         options={{ title: "Profile" }}
       />
     </Tab.Navigator>

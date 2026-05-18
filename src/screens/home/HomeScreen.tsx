@@ -33,7 +33,7 @@ type Props = NativeStackScreenProps<HomeStackParamList, "Home">;
 
 export default function HomeScreen({ navigation }: Props) {
   const { profile } = useAuthStore();
-  const { recentWorkouts, loadRecentWorkouts, startWorkout } =
+  const { recentWorkouts, loadRecentWorkouts, startWorkout, recalculateLifetimePR } =
     useWorkoutStore();
   const { activeRoutine, routineDetails, loadRoutines, loadRoutineDetail } =
     useRoutineStore();
@@ -43,6 +43,13 @@ export default function HomeScreen({ navigation }: Props) {
     loadRecentWorkouts();
     loadRoutines();
   }, []);
+
+  // Backfill PR if missing from profile (one-time migration logic)
+  useEffect(() => {
+    if (profile && profile.lifetime_pr === undefined) {
+      recalculateLifetimePR();
+    }
+  }, [profile?.id]);
 
   async function handleRefresh() {
     setRefreshing(true);
@@ -138,20 +145,14 @@ export default function HomeScreen({ navigation }: Props) {
   const workoutDayStrings = recentWorkouts.map(w => new Date(w.started_at).toDateString());
   const todayStr = today.toDateString();
 
-  // 2. Personal Best Spotlight (Top lift from recent history)
-  // We scan the recent workouts for the heaviest set ever logged.
-  const allExercises = recentWorkouts.flatMap(w => (w as any).exercises || []);
-  const allSets = allExercises.flatMap(ex => ex.sets || []);
-  const bestSet = allSets.reduce((prev: any, curr: any) => 
-    (curr.weight_kg ?? 0) > (prev?.weight_kg ?? 0) ? curr : prev
-  , null);
-
+  // 2. Personal Best Spotlight (Top lift from user profile)
+  const pr = profile?.lifetime_pr;
   let prTitle = "No PRs yet";
   let prSub = "Start lifting to set records";
-  if (bestSet) {
-    const prExercise = allExercises.find(ex => (ex.sets || []).some((s: any) => s.id === bestSet.id));
-    prTitle = `${bestSet.weight_kg}kg ${prExercise?.exercise_name}`;
-    prSub = `Your heaviest lift in recent history`;
+  
+  if (pr) {
+    prTitle = `${pr.weight_kg}kg ${pr.exercise_name}`;
+    prSub = `Your heaviest lift in training history`;
   }
 
   return (
@@ -303,15 +304,20 @@ export default function HomeScreen({ navigation }: Props) {
         </TouchableOpacity>
 
         {/* PR Spotlight Card */}
-        <Card variant="default" padding="md" style={styles.prCard}>
-          <View style={styles.prHeader}>
-            <Ionicons name="trophy" size={16} color={Colors.warning} />
-            <Text style={styles.prLabel}>PERSONAL BEST SPOTLIGHT</Text>
-          </View>
-          <Text style={styles.prTitle}>{prTitle}</Text>
-          <Text style={styles.prSub}>{prSub}</Text>
-          <View style={styles.prGlow} />
-        </Card>
+        <TouchableOpacity
+          onPress={() => navigation.navigate("PRSpotlight")}
+          activeOpacity={0.85}
+        >
+          <Card variant="default" padding="md" style={styles.prCard}>
+            <View style={styles.prHeader}>
+              <Ionicons name="trophy" size={16} color={Colors.warning} />
+              <Text style={styles.prLabel}>PERSONAL BEST SPOTLIGHT</Text>
+            </View>
+            <Text style={styles.prTitle}>{prTitle}</Text>
+            <Text style={styles.prSub}>{prSub}</Text>
+            <View style={styles.prGlow} />
+          </Card>
+        </TouchableOpacity>
 
         {/* Recent Workouts */}
         <Text style={styles.sectionTitle}>Recent Workouts</Text>

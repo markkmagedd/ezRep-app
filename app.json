@@ -27,7 +27,17 @@
       "favicon": "./assets/favicon.png"
     },
     "scheme": "ezrep",
-    "plugins": ["expo-secure-store", "expo-font"],
+    "plugins": [
+      "expo-secure-store",
+      "expo-font",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow ezRep to access your photo library so you can update your profile photo.",
+          "cameraPermission": "Allow ezRep to use your camera so you can take a profile photo."
+        }
+      ]
+    ],
     "extra": {
       "supabaseUrl": "",
       "supabaseAnonKey": ""

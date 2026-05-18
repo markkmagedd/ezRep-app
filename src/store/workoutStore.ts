@@ -23,7 +23,7 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
-import type { Workout } from "@/types";
+import { Workout, ExercisePR } from "@/types";
 import { useAuthStore } from "./authStore";
 
 // ── Local draft types (in-progress workout) ──────────────────────────────────
@@ -67,6 +67,9 @@ interface WorkoutState {
   // Recent workouts list
   recentWorkouts: Workout[];
 
+  // PR list for all exercises
+  exercisePRs: ExercisePR[];
+
   // Actions
   startWorkout: (options?: StartWorkoutOptions) => Promise<string>; // returns workoutId
   addExercise: (exerciseId: string, exerciseName: string) => string;
@@ -98,6 +101,10 @@ interface WorkoutState {
 
   loadRecentWorkouts: (limit?: number) => Promise<void>;
   loadWorkout: (workoutId: string) => Promise<void>;
+
+  /** PR Calculations */
+  recalculateLifetimePR: () => Promise<void>;
+  loadAllExercisePRs: () => Promise<void>;
 
   // Data Aggregators for Yearly Consistency
   getYearlyActivityOptions: () => number[];
@@ -136,6 +143,7 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
   isLoading: false,
   error: null,
   recentWorkouts: [],
+  exercisePRs: [],
 
   // ── startWorkout ─────────────────────────────────────────────────────────
   startWorkout: async (options = {}) => {
@@ -420,6 +428,38 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
         total_training_seconds: increment(durationSeconds),
       });
 
+      // ── PR Check ──────────────────────────────────────────────────────────
+      // Check if this workout set a new Personal Best (or tied for most recent)
+      const currentProfile = useAuthStore.getState().profile;
+      const currentPR = currentProfile?.lifetime_pr;
+
+      let heaviestWeightInWorkout = 0;
+      let heaviestExerciseName = "";
+
+      for (const ex of exercisesPayload) {
+        for (const s of ex.sets) {
+          if (s.weight_kg !== null && s.weight_kg >= heaviestWeightInWorkout) {
+            heaviestWeightInWorkout = s.weight_kg;
+            heaviestExerciseName = ex.exercise_name;
+          }
+        }
+      }
+
+      // If workoutMax >= currentPR weight, we update (>= handles the "most recent" tie-breaker)
+      if (
+        heaviestWeightInWorkout > 0 &&
+        (!currentPR || heaviestWeightInWorkout >= currentPR.weight_kg)
+      ) {
+        const newPR = {
+          weight_kg: heaviestWeightInWorkout,
+          exercise_name: heaviestExerciseName,
+          achieved_at: endedAt.toISOString(),
+        };
+        await updateDoc(doc(db, "users", user.uid), { lifetime_pr: newPR });
+        // Hydrate local store immediately
+        useAuthStore.getState().updateProfile({ lifetime_pr: newPR });
+      }
+
       // Advance the linked routine to the next day (wraps around)
       if (linkedRoutineId) {
         const routineRef = doc(
@@ -543,4 +583,101 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
 
     return grid;
   },
+
+  recalculateLifetimePR: async () => {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    // Fetch all workouts to find greatest weight (descending to find most recent tie)
+    const snap = await getDocs(
+      query(
+        collection(db, "users", user.uid, "workouts"),
+        where("ended_at", "!=", null),
+        orderBy("ended_at", "desc"),
+      ),
+    );
+
+    let bestWeight = 0;
+    let bestExercise = "";
+    let achievedAt = "";
+
+    for (const d of snap.docs) {
+      const data = d.data();
+      const exercises = data.exercises || [];
+      for (const ex of exercises) {
+        const sets = (ex.sets || []).filter((s: any) => s.weight_kg !== null);
+        for (const s of sets) {
+          if (s.weight_kg > bestWeight) {
+            bestWeight = s.weight_kg;
+            bestExercise = ex.exercise_name;
+            achievedAt =
+              data.ended_at?.toDate?.()?.toISOString() ||
+              new Date().toISOString();
+          }
+          // Note: Since we fetch newest first (orderBy desc), if we find == bestWeight later,
+          // we ignore it because it's older.
+        }
+      }
+    }
+
+    if (bestWeight > 0) {
+      const pr = {
+        weight_kg: bestWeight,
+        exercise_name: bestExercise,
+        achieved_at: achievedAt,
+      };
+      await updateDoc(doc(db, "users", user.uid), { lifetime_pr: pr });
+      useAuthStore.getState().updateProfile({ lifetime_pr: pr });
+    }
+  },
+
+  loadAllExercisePRs: async () => {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    set({ isLoading: true });
+    try {
+      const snap = await getDocs(
+        query(
+          collection(db, "users", user.uid, "workouts"),
+          where("ended_at", "!=", null),
+          orderBy("ended_at", "desc")
+        )
+      );
+
+      const prMap: Record<string, ExercisePR> = {};
+
+      for (const d of snap.docs) {
+        const data = d.data();
+        const exercises = data.exercises || [];
+        for (const ex of exercises) {
+          const exerciseName = ex.exercise_name;
+          const sets = (ex.sets || []).filter((s: any) => s.weight_kg !== null && s.weight_kg > 0);
+          
+          for (const s of sets) {
+            const weight = s.weight_kg;
+            const achievedAt = data.ended_at?.toDate?.()?.toISOString() || new Date().toISOString();
+
+            if (!prMap[exerciseName] || weight > prMap[exerciseName].weight_kg) {
+              prMap[exerciseName] = {
+                exercise_name: exerciseName,
+                weight_kg: weight,
+                achieved_at: achievedAt,
+              };
+            }
+          }
+        }
+      }
+
+      const prList = Object.values(prMap).sort((a, b) => 
+        a.exercise_name.localeCompare(b.exercise_name)
+      );
+
+      set({ exercisePRs: prList, isLoading: false });
+    } catch (err) {
+      console.error("Error loading PRs:", err);
+      set({ isLoading: false, error: String(err) });
+    }
+  },
 }));
+
